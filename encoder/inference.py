@@ -12,25 +12,19 @@ _model = None # type: SpeakerEncoder
 _device = None # type: torch.device
 
 
-def load_model(weights_fpath: Path, device=None):
+def load_model(weights_fpath: Path):
     """
     Loads the model in memory. If this function is not explicitely called, it will be run on the 
     first call to embed_frames() with the default weights file.
     
     :param weights_fpath: the path to saved model weights.
-    :param device: either a torch device or the name of a torch device (e.g. "cpu", "cuda"). The 
-    model will be loaded and will run on this device. Outputs will however always be on the cpu. 
-    If None, will default to your GPU if it"s available, otherwise your CPU.
     """
     # TODO: I think the slow loading of the encoder might have something to do with the device it
     #   was saved on. Worth investigating.
     global _model, _device
-    if device is None:
-        _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    elif isinstance(device, str):
-        _device = torch.device(device)
+    _device = torch.device("cpu")
     _model = SpeakerEncoder(_device, torch.device("cpu"))
-    checkpoint = torch.load(weights_fpath)
+    checkpoint = torch.load(weights_fpath, map_location=torch.device('cpu'))
     _model.load_state_dict(checkpoint["model_state"])
     _model.eval()
     print("Loaded encoder \"%s\" trained to step %d" % (weights_fpath.name, checkpoint["step"]))

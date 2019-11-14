@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Union, List
 import tensorflow as tf
 import numpy as np
-import numba.cuda
 import librosa
 
 
@@ -95,11 +94,8 @@ class Synthesizer:
         # Detach the outputs (not doing so will cause the process to hang)
         specs, alignments = [spec.copy() for spec in specs], alignments.copy()
         
-        # Close cuda for this process
         model.session.close()
-        numba.cuda.select_device(0)
-        numba.cuda.close()
-        
+
         return specs, alignments
 
     @staticmethod

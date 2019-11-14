@@ -23,11 +23,11 @@ def load_model(weights_fpath, verbose=True):
         hop_length=hp.hop_length,
         sample_rate=hp.sample_rate,
         mode=hp.voc_mode
-    ).cuda()
+    )
     
     if verbose:
         print("Loading model weights at %s" % weights_fpath)
-    checkpoint = torch.load(weights_fpath)
+    checkpoint = torch.load(weights_fpath, map_location=torch.device('cpu'))
     _model.load_state_dict(checkpoint['model_state'])
     _model.eval()
 
