@@ -38,24 +38,7 @@ if __name__ == '__main__':
     
     ## Print some environment information (for debugging purposes)
     print("Running a test of your configuration...\n")
-    if not torch.cuda.is_available():
-        print("Your PyTorch installation is not configured to use CUDA. If you have a GPU ready "
-              "for deep learning, ensure that the drivers are properly installed, and that your "
-              "CUDA version matches your PyTorch installation. CPU-only inference is currently "
-              "not supported.", file=sys.stderr)
-        quit(-1)
-    device_id = torch.cuda.current_device()
-    gpu_properties = torch.cuda.get_device_properties(device_id)
-    print("Found %d GPUs available. Using GPU %d (%s) of compute capability %d.%d with "
-          "%.1fGb total memory.\n" % 
-          (torch.cuda.device_count(),
-           device_id,
-           gpu_properties.name,
-           gpu_properties.major,
-           gpu_properties.minor,
-           gpu_properties.total_memory / 1e9))
-    
-    
+
     ## Load the models one by one.
     print("Preparing the encoder, the synthesizer and the vocoder...")
     encoder.load_model(args.enc_model_fpath)
