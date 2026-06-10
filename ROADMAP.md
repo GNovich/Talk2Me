@@ -81,7 +81,10 @@ let the engine re-prompt). The transcript feeds two consumers: the question
 engine (for topic extraction) and the logging layer.
 **Tools.** `mlx-whisper` (`pip install mlx-whisper`); `numpy`.
 **Sources.** https://github.com/ml-explore/mlx-examples/tree/main/whisper ;
-model card `mlx-community/whisper-large-v3-turbo`.
+model card `mlx-community/whisper-large-v3-turbo`. **Reuse:** the in-house
+`PdfReader` project already runs a Whisper aligner under MLX in `align_server.py`
+— lift its model-load / device-handling code (it solved Apple-Silicon MPS
+quirks) rather than re-deriving it.
 **Extra.** Whisper also returns no-speech probability — use it as a secondary VAD
 confirmation to reject false triggers before invoking TTS.
 
@@ -102,8 +105,15 @@ real participants.
 https://github.com/SWivid/F5-TTS ; paper https://arxiv.org/abs/2410.06885 .
 **Extra.** First call JIT-warms the model — preload and run one throwaway
 synthesis at startup so the participant's first question isn't slow. Cache the
-loaded model across turns. If the separate in-house TTS project already runs
-F5-TTS-MLX, port its loader/config directly instead of re-deriving params.
+loaded model across turns.
+**Important — in-house reuse, corrected:** the `PdfReader` project does **not**
+have a voice cloner. Its TTS is **`mlx-community/Kokoro-82M-bf16`**, a fixed
+preset-voice model that *cannot* clone a participant's voice — so F5-TTS-MLX here
+is net-new. What IS reusable from PdfReader: (a) its `mlx_audio.server` pattern
+of running TTS as a local OpenAI-compatible HTTP service (consider the same
+architecture for Talk2Me — decouple synthesis from the capture loop); (b)
+Kokoro itself as a *non-cloned* narrator for the neutral seed voice in Feature 7
+and any system/operator prompts. Do not assume an F5-TTS loader exists there.
 
 ### 5. End-to-end single-turn loop
 **Description.** Stitch Features 2–4 into one verified round-trip:
@@ -151,8 +161,10 @@ the reference (or on synthesis conditioning) that ramps from neutral→self acro
 the calibration phase. Must be a toggle in `config/` (`migration: on|off`) since
 the alternative — full self-voice from turn 1 — is also artistically valid and
 should be A/B-able in the gallery.
-**Tools.** F5-TTS conditioning; a neutral seed reference clip bundled in `assets/`.
-**Sources.** Feature 4/6 internals.
+**Tools.** F5-TTS conditioning; a neutral seed reference clip bundled in
+`assets/` — this can be generated once with PdfReader's Kokoro voice (a clean,
+neutral preset) so the seed is consistent and license-clear.
+**Sources.** Feature 4/6 internals; `mlx-community/Kokoro-82M-bf16` for the seed.
 **Extra.** This is a curatorial decision as much as a technical one — surface the
 toggle clearly and document both modes' intended effect for the exhibit operator.
 
@@ -278,3 +290,10 @@ smoke-test, panic/reset, shutdown.
   be replaced by MLX pipeline (Whisper-MLX + F5-TTS-MLX + optional mlx-lm).
   Features 1–14 defined in binding delivery order across Phases 0–4. No
   implementation started.
+- 2026-06-10 — Reviewed in-house `GNovich/PdfReader` (could not read source —
+  out of session scope; confirmed via commit metadata). Its TTS is
+  `mlx-community/Kokoro-82M-bf16` (preset voices, **no cloning**), served via
+  `mlx_audio.server`, with a Whisper MLX aligner in `align_server.py`. Corrected
+  Features 3/4/7: F5-TTS-MLX cloning is net-new (Kokoro can't clone); reusable
+  from PdfReader = the Whisper-MLX load code, the `mlx_audio.server` local-HTTP
+  TTS pattern, and Kokoro as the neutral seed/narrator voice.
