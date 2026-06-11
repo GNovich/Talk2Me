@@ -26,7 +26,7 @@
 
 ## Phase 0 — Foundation
 
-### 1. Repository teardown & MLX scaffold
+### 1. Repository teardown & MLX scaffold **[COMPLETED 2026-06-11: Legacy stack (encoder/, synthesizer/, vocoder/, toolbox/, all train/preprocess scripts, demo files, conda requirements.txt) deleted after tagging `legacy-tacotron2-waveRNN-stack`. utils/logmmse.py relocated to talk2me/audio/logmmse.py. New layout: talk2me/{audio,stt,tts,engine}/, config/exhibit.yaml, questions/, saved_audio/, tests/. pyproject.toml with Python 3.11+, mlx-whisper, f5-tts-mlx, sounddevice, numpy, pyyaml, onnxruntime deps. README rewritten. 5 smoke tests pass.]**
 **Description.** Strip the legacy three-model pipeline and stand up a clean,
 single-package project. Remove `encoder/`, `synthesizer/`, `vocoder/`,
 `toolbox/`, the `*_train.py` / `*_preprocess.py` scripts, `demo_*.py`, and the
@@ -46,7 +46,7 @@ flow as reference for the new loop, then delete).
 **Extra.** Keep one frozen tag/commit of the legacy build before deletion so the
 original art piece remains reproducible for archival.
 
-### 2. Audio I/O + Voice Activity Detection
+### 2. Audio I/O + Voice Activity Detection **[COMPLETED 2026-06-11: Microphone (sounddevice 16 kHz mono float32, device by name/index/None) + Speaker (~1 s tail pad, thread-locked) in talk2me/audio/io.py. Silero VAD ONNX gate (auto-downloads to ~/.cache/talk2me/) with _EnergyGate fallback in talk2me/audio/vad.py. record_utterance(mic, max_seconds, silence_ms) -> np.ndarray API. build_gate() for pre-warming. Config knobs in config/exhibit.yaml. 7 unit tests pass. On-hardware audio verification deferred to exhibit Mac.]**
 **Description.** Build the real-time capture and playback layer that everything
 else feeds on. A `Microphone` wrapper around `sounddevice` for low-latency input
 at 16 kHz mono; a `Speaker` wrapper for blocking + non-blocking playback (carry
@@ -70,7 +70,7 @@ the silence threshold and input gain exhibit-tunable via `config/`.
 
 ## Phase 1 — Core Local Pipeline
 
-### 3. Local speech-to-text with Whisper-MLX
+### 3. Local speech-to-text with Whisper-MLX **[COMPLETED 2026-06-11: Transcriber.transcribe(wav) -> TranscriptResult(text, no_speech_prob, avg_logprob, latency_s) in talk2me/stt/whisper.py. Default model mlx-community/whisper-large-v3-turbo; model loaded + JIT-warmed on first call; empty/None input short-circuits. is_speech() uses no_speech_prob threshold. avg_logprob exposed for Feature 6 quality ranking. 6 unit tests + 1 @model integration test. On-hardware latency verification deferred.]**
 **Description.** Replace Google cloud STT (`recognizer.recognize_google`) with a
 fully-offline, Apple-Silicon-accelerated transcriber. Wrap `mlx-whisper` behind
 a `Transcriber.transcribe(wav: np.ndarray) -> str` interface. Default model
@@ -297,3 +297,8 @@ smoke-test, panic/reset, shutdown.
   Features 3/4/7: F5-TTS-MLX cloning is net-new (Kokoro can't clone); reusable
   from PdfReader = the Whisper-MLX load code, the `mlx_audio.server` local-HTTP
   TTS pattern, and Kokoro as the neutral seed/narrator voice.
+- 2026-06-11 — Automated session. Features 1, 2, 3 implemented and committed.
+  Legacy stack deleted (archival tag: `legacy-tacotron2-waveRNN-stack`). New MLX
+  package scaffold in place; 18 unit tests pass. On-hardware audio/latency
+  verification deferred (session ran without exhibit Mac). Next: Features 4
+  (F5-TTS-MLX cloning), 5 (end-to-end loop), 6 (rolling reference accumulation).
