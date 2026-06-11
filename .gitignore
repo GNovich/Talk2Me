@@ -15,7 +15,5 @@
 *.toc
 *.wav
 *.sh
-encoder/saved_models/*
-synthesizer/saved_models/*
-vocoder/saved_models/*
 saved_audio/*
+!saved_audio/.gitkeep

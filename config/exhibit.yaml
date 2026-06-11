@@ -1,0 +1,25 @@
+# Talk2Me exhibit configuration
+# Edit between gallery sessions without touching source code.
+
+audio:
+  sample_rate: 16000          # Hz — must match Whisper expectation
+  input_device: null          # null = system default; set to device name or index
+  output_device: null
+  input_gain: 1.0
+  silence_threshold_ms: 800   # trailing-silence gap that ends an utterance
+  max_utterance_seconds: 30
+  noise_calibration_seconds: 2
+
+stt:
+  model: "mlx-community/whisper-large-v3-turbo"   # --stt-model overrides
+  no_speech_threshold: 0.6    # reject utterances with no-speech prob above this
+
+tts:
+  warmup_text: "Hello, I am listening."
+
+engine:
+  llm: false                  # enable mlx-lm adaptive question selection
+  migration: true             # true = ramp neutral→self voice; false = clone from turn 1
+  calibration_turns: 2        # questions whose primary job is reference audio harvest
+  personal_turns: 3           # turns 3–5
+  idle_timeout_seconds: 60    # reset session after this much silence
