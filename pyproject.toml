@@ -37,3 +37,7 @@ select = ["E", "F", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "model: requires ML model weights to be downloaded (slow, skipped in CI)",
+    "hardware: requires real audio hardware",
+]
