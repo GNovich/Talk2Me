@@ -88,7 +88,7 @@ quirks) rather than re-deriving it.
 **Extra.** Whisper also returns no-speech probability — use it as a secondary VAD
 confirmation to reject false triggers before invoking TTS.
 
-### 4. Zero-shot voice cloning with F5-TTS-MLX
+### 4. Zero-shot voice cloning with F5-TTS-MLX **[COMPLETED 2026-06-12: VoiceCloner.synthesize(text, reference_wav, reference_text, reference_sample_rate) -> np.ndarray in talk2me/tts/voice_cloner.py. F5TTS.from_pretrained loaded once + JIT-warmed via bundled test clip. 16 kHz mic audio resampled to 24 kHz via scipy.signal.resample_poly. RMS-normalised to F5-TTS training level. Duration estimated from char-count ratio. Wired into app.py. On-hardware audible verification and latency measurement deferred to exhibit Mac.]**
 **Description.** The heart of the piece. Replace the entire Tacotron2 +
 WaveRNN + custom-encoder chain with **F5-TTS-MLX**, a flow-matching TTS that
 clones a voice zero-shot from a few seconds of reference audio and synthesizes
@@ -115,7 +115,7 @@ architecture for Talk2Me — decouple synthesis from the capture loop); (b)
 Kokoro itself as a *non-cloned* narrator for the neutral seed voice in Feature 7
 and any system/operator prompts. Do not assume an F5-TTS loader exists there.
 
-### 5. End-to-end single-turn loop
+### 5. End-to-end single-turn loop **[COMPLETED 2026-06-12: talk2me/app.py implements record_utterance → Transcriber.transcribe → ReferenceBuffer.push → VoiceCloner.synthesize → Speaker.play with time.perf_counter() at each stage. Pre-warms Whisper and F5-TTS at startup. Latency breakdown printed per-turn: [STT|TTS|play|total]. Per-turn output saved to saved_audio/. Handles empty transcript, no-reference, synthesis errors, KeyboardInterrupt. Hard-coded placeholder question; Feature 8/9 will replace. On-hardware latency verification deferred.]**
 **Description.** Stitch Features 2–4 into one verified round-trip:
 `record_utterance → transcribe → (fixed question) → synthesize in cloned voice →
 play`. Hard-code a single placeholder question to prove the pipeline before the
@@ -132,7 +132,7 @@ across later features are caught immediately.
 
 ## Phase 2 — The Voice-Transfer Mechanic
 
-### 6. Rolling reference accumulation ("the voice that sharpens")
+### 6. Rolling reference accumulation ("the voice that sharpens") **[COMPLETED 2026-06-12: ReferenceBuffer in talk2me/tts/reference_buffer.py. push(wav, TranscriptResult) quality-gates segments (RMS > 0.005, peak < 0.95, avg_logprob > -1.5, non-empty text). best_reference() returns quality-ranked segments up to 30 s cap in capture order. Tier 0→1 at ≥3 s, 1→2 at ≥9 s, 2→3 at ≥20 s. Result cached; invalidated on push. reset() for session teardown. Wired into app.py. 14 unit tests pass. Audible sharpening verification deferred to exhibit Mac.]**
 **Description.** This is the artistic core: the clone must *improve over the
 conversation*. Maintain a rolling buffer of the participant's captured utterances
 (audio + transcripts). On each turn, append the new utterance; when total
@@ -300,5 +300,10 @@ smoke-test, panic/reset, shutdown.
 - 2026-06-11 — Automated session. Features 1, 2, 3 implemented and committed.
   Legacy stack deleted (archival tag: `legacy-tacotron2-waveRNN-stack`). New MLX
   package scaffold in place; 18 unit tests pass. On-hardware audio/latency
-  verification deferred (session ran without exhibit Mac). Next: Features 4
-  (F5-TTS-MLX cloning), 5 (end-to-end loop), 6 (rolling reference accumulation).
+  verification deferred (session ran without exhibit Mac).
+- 2026-06-12 — Automated session. Features 4, 5, 6 implemented and committed.
+  VoiceCloner (F5-TTS-MLX), end-to-end app loop, and ReferenceBuffer in place.
+  f5-tts-mlx installed (0.2.6); scipy added for 16→24 kHz polyphase resampling.
+  36 unit tests pass. All audible verification and latency measurement deferred to
+  exhibit Mac. Next: Features 7 (neutral→self migration), 8 (question bank),
+  9 (state machine).
