@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from talk2me.tts.voice_cloner import VoiceCloner, SAMPLE_RATE, _resample
-from talk2me.tts.reference_buffer import ReferenceBuffer
+from talk2me.tts.reference_buffer import ReferenceBuffer, _DEFAULT_MIGRATION_ALPHAS
 from talk2me.stt.whisper import TranscriptResult
 
 
@@ -190,6 +190,36 @@ def test_buffer_cache_is_invalidated_on_push():
     ref2, _ = buf.best_reference()
     # Second call should return a longer clip
     assert len(ref2) > len(ref1)
+
+
+# ── VoiceCloner migration_alpha (Feature 7) ──────────────────────────────────
+
+def test_voice_cloner_has_neutral_seed_false_by_default(tmp_path):
+    """Without assets/neutral_seed.wav the cloner reports no neutral seed."""
+    vc = VoiceCloner(neutral_seed_path=tmp_path / "nonexistent.wav")
+    assert not vc.has_neutral_seed
+
+
+def test_voice_cloner_loads_neutral_seed(tmp_path):
+    """VoiceCloner loads a neutral seed WAV when the file exists."""
+    import soundfile as sf
+    wav_path = tmp_path / "neutral_seed.wav"
+    txt_path = tmp_path / "neutral_seed_text.txt"
+    # Write a minimal 1-second sine-wave clip
+    t = __import__("numpy").linspace(0, 1, 24_000, dtype="float32")
+    seed_wav = (__import__("numpy").sin(2 * 3.14159 * 440 * t) * 0.1).astype("float32")
+    sf.write(str(wav_path), seed_wav, 24_000)
+    txt_path.write_text("Some neutral seed text.", encoding="utf-8")
+    vc = VoiceCloner(neutral_seed_path=wav_path)
+    assert vc.has_neutral_seed
+
+
+def test_voice_cloner_synthesize_empty_text_ignores_alpha():
+    """migration_alpha has no effect when text is empty."""
+    vc = VoiceCloner()
+    result = vc.synthesize("", __import__("numpy").zeros(24_000, dtype="float32"),
+                           "ref text", migration_alpha=0.5)
+    assert len(result) == 0
 
 
 # ── model integration (requires weights) ─────────────────────────────────────

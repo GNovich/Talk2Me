@@ -1,0 +1,60 @@
+# Phase 3 — Confrontational questions (turns 6+)
+#
+# These questions are designed to sit in the body. They should arrive in
+# the participant's own voice, uncannily exact by now.
+# They are not cruel, but they are not comfortable.
+#
+# Content/consent note: Phase 3 is intense by design. Pair with the safety
+# features (Feature 12) so the participant can always leave. The gallery
+# attendant must have the panic key within reach at all times.
+#
+# Artist note: by now, the voice clone is at tier 3 — exact or very close.
+# The discomfort is that the participant is asking themselves these questions.
+
+- id: con_01
+  text: "What are you afraid people see when they look at you?"
+  topic_hooks: [afraid, fear, see, look, people, others, perceive]
+
+- id: con_02
+  text: "What is the last lie you told that you are still carrying?"
+  topic_hooks: [lie, truth, told, said, carry, holding, secret]
+
+- id: con_03
+  text: "What question are you most afraid someone will ask you?"
+  topic_hooks: [question, afraid, fear, ask, answer, someone]
+
+- id: con_04
+  text: "What do you wish you could ask for, but can't?"
+  topic_hooks: [ask, want, need, wish, can't, unable]
+
+- id: con_05
+  text: "What part of yourself do you keep hidden, even from the people closest to you?"
+  topic_hooks: [hide, hidden, secret, close, people, family, friend, private]
+
+- id: con_06
+  text: "When did you last cry, and did you let yourself?"
+  topic_hooks: [cry, tears, sad, grief, loss, feel, let]
+
+- id: con_07
+  text: "What do you think about when you cannot sleep?"
+  topic_hooks: [sleep, night, think, worry, awake, alone, dark]
+
+- id: con_08
+  text: "What have you forgiven yourself for, and what haven't you?"
+  topic_hooks: [forgive, forgiveness, mistake, regret, past, wrong]
+
+- id: con_09
+  text: "What is something you know about yourself that you wish you didn't?"
+  topic_hooks: [know, truth, self, wish, aware, realize]
+
+- id: con_10
+  text: "If this were the last conversation you had, what would you want it to have been about?"
+  topic_hooks: [last, end, want, conversation, say, matter, important]
+
+- id: con_11
+  text: "What are you waiting for permission to do?"
+  topic_hooks: [waiting, permission, allow, ready, when, start]
+
+- id: con_12
+  text: "What do you do when no one is watching?"
+  topic_hooks: [alone, private, watch, no one, yourself, do]

@@ -3,8 +3,14 @@
 Feature 5: end-to-end single-turn pipeline —
     record_utterance → Transcriber.transcribe → VoiceCloner.synthesize → Speaker.play
 
-Feature 6 wired: after each turn the participant's utterance is pushed into a
-ReferenceBuffer; the next turn's synthesis uses the best accumulated reference.
+Feature 6 wired: participant utterances accumulate in ReferenceBuffer; each
+successive turn uses a progressively sharper voice clone.
+
+Feature 7 wired: when engine.migration=true, VoiceCloner.synthesize() receives
+a per-tier migration_alpha from ReferenceBuffer, blending neutral→self voice.
+
+Features 8+9 wired: ConversationEngine (backed by QuestionBank) replaces the
+hard-coded placeholder question with a phase-advancing, topic-biased selector.
 
 Latency is instrumented at every stage; per-turn breakdown is printed and
 accumulated for the session log.
@@ -22,7 +28,6 @@ import numpy as np
 import yaml
 
 
-_PLACEHOLDER_QUESTION = "What brought you here today?"
 _REPROMPT_QUESTION = "Take your time — I'm listening."
 
 
@@ -62,10 +67,12 @@ def run_loop(
     cfg = _load_config(config_path)
     audio_cfg = cfg.get("audio", {})
     stt_cfg = cfg.get("stt", {})
-    tts_cfg = cfg.get("tts", {})
+    engine_cfg = cfg.get("engine", {})
 
     out_dir = Path(__file__).parent.parent / "saved_audio"
     out_dir.mkdir(exist_ok=True)
+
+    questions_dir = Path(__file__).parent.parent / "questions"
 
     # ── build components ──────────────────────────────────────────────────────
     from talk2me.audio.io import Microphone, Speaker, SAMPLE_RATE as MIC_RATE
@@ -73,6 +80,8 @@ def run_loop(
     from talk2me.stt.whisper import Transcriber
     from talk2me.tts.voice_cloner import VoiceCloner
     from talk2me.tts.reference_buffer import ReferenceBuffer
+    from talk2me.engine.question_bank import QuestionBank
+    from talk2me.engine.state_machine import ConversationEngine
 
     mic = Microphone(
         device=audio_cfg.get("input_device"),
@@ -81,7 +90,21 @@ def run_loop(
     speaker = Speaker(device=audio_cfg.get("output_device"))
     transcriber = Transcriber(model=stt_cfg.get("model", "mlx-community/whisper-large-v3-turbo"))
     cloner = VoiceCloner()
-    ref_buffer = ReferenceBuffer()
+
+    migration_enabled = engine_cfg.get("migration", True)
+    migration_alphas = tuple(engine_cfg.get("migration_alphas", [0.2, 0.5, 0.8, 1.0]))
+
+    ref_buffer = ReferenceBuffer(migration_alphas=migration_alphas)
+
+    bank = QuestionBank()
+    bank.load(questions_dir)
+
+    engine = ConversationEngine(
+        question_bank=bank,
+        calibration_turns=engine_cfg.get("calibration_turns", 2),
+        personal_turns=engine_cfg.get("personal_turns", 3),
+        idle_timeout_seconds=engine_cfg.get("idle_timeout_seconds", 60.0),
+    )
 
     no_speech_threshold = stt_cfg.get("no_speech_threshold", 0.6)
     max_utterance_s = audio_cfg.get("max_utterance_seconds", 30)
@@ -95,26 +118,37 @@ def run_loop(
     print("[app] Pre-warming F5-TTS … (throwaway synthesis)")
     cloner.warm()
 
+    if migration_enabled and not cloner.has_neutral_seed:
+        print("[app] Warning: migration=true but no neutral seed found — "
+              "place assets/neutral_seed.wav to enable voice ramp.")
+
     print("[app] Building VAD gate …")
     gate = build_gate(mic, calibration_seconds=noise_cal_s)
 
     print("[app] Ready.  Listening for participant …\n")
 
     # ── per-session state ─────────────────────────────────────────────────────
-    turn = 0
+    logical_turn = 0          # counts only completed turns
     session_latencies: list[dict] = []
+    speaker_for_tts: Optional[Speaker] = None  # created once at 24 kHz
 
     # ── main loop ─────────────────────────────────────────────────────────────
     while True:
-        if max_turns is not None and turn >= max_turns:
+        if max_turns is not None and logical_turn >= max_turns:
             break
 
-        turn += 1
-        print(f"\n── Turn {turn} ────────────────────────────────────────────")
+        # Check idle timeout → reset session
+        if logical_turn > 0 and engine.should_reset():
+            print("[app] Idle timeout — resetting session.")
+            ref_buffer.reset()
+            engine.reset()
+            logical_turn = 0
+            session_latencies.clear()
+            speaker_for_tts = None
+            print("[app] Session reset. Listening for next participant …\n")
 
         try:
             # 1. Record
-            t_rec = time.perf_counter()
             print("[app] Listening …")
             wav = record_utterance(
                 mic,
@@ -122,11 +156,9 @@ def run_loop(
                 silence_ms=silence_ms,
                 _gate=gate,
             )
-            rec_s = time.perf_counter() - t_rec
 
             if len(wav) == 0:
                 print("[app] No speech detected, re-prompting.")
-                turn -= 1
                 continue
 
             # 2. Transcribe
@@ -136,7 +168,6 @@ def run_loop(
 
             if not transcriber.is_speech(result, threshold=no_speech_threshold):
                 print(f"[app] Likely non-speech (no_speech_prob={result.no_speech_prob:.2f}), re-prompting.")
-                turn -= 1
                 continue
 
             print(f"[app] Transcript: {result.text!r}")
@@ -145,33 +176,45 @@ def run_loop(
             ref_buffer.push(wav, result, sample_rate=MIC_RATE)
             ref_wav, ref_text = ref_buffer.best_reference()
 
-            # 4. Choose question
-            question = _PLACEHOLDER_QUESTION
-
-            # 5. Synthesize
-            t_tts = time.perf_counter()
-            if ref_wav is not None and ref_text:
-                synth_wav = cloner.synthesize(
-                    question,
-                    reference_wav=ref_wav,
-                    reference_text=ref_text,
-                    reference_sample_rate=MIC_RATE,
-                )
-            else:
-                # No reference yet (first turn didn't pass quality) — skip playback
-                print("[app] No reference audio yet, skipping synthesis.")
+            if ref_wav is None or not ref_text:
+                print("[app] No usable reference audio yet, re-prompting.")
                 continue
+
+            # 4. Choose question (Feature 8+9)
+            logical_turn_next = logical_turn + 1
+            question = engine.next_question()
+            print(f"[app] Phase {engine.phase}, turn {logical_turn_next}: {question!r}")
+
+            # 5. Determine migration alpha (Feature 7)
+            if migration_enabled and cloner.has_neutral_seed:
+                alpha = ref_buffer.migration_alpha()
+            else:
+                alpha = 1.0
+
+            # 6. Synthesize
+            t_tts = time.perf_counter()
+            synth_wav = cloner.synthesize(
+                question,
+                reference_wav=ref_wav,
+                reference_text=ref_text,
+                reference_sample_rate=MIC_RATE,
+                migration_alpha=alpha,
+            )
             tts_s = time.perf_counter() - t_tts
 
-            # 6. Play
+            # 7. Play
             t_play = time.perf_counter()
-            # Speaker was initialised at MIC_RATE (16 kHz); cloner outputs 24 kHz
-            speaker_for_tts = Speaker(
-                device=audio_cfg.get("output_device"),
-                sample_rate=cloner.sample_rate,
-            )
+            if speaker_for_tts is None:
+                speaker_for_tts = Speaker(
+                    device=audio_cfg.get("output_device"),
+                    sample_rate=cloner.sample_rate,
+                )
             speaker_for_tts.play(synth_wav, blocking=True)
             play_s = time.perf_counter() - t_play
+
+            # 8. Record completed turn in engine
+            engine.record_turn(transcript=result.text, question_asked=question)
+            logical_turn += 1
 
             total_s = stt_s + tts_s + play_s
             latencies = dict(stt=stt_s, tts=tts_s, play=play_s, total=total_s)
@@ -179,18 +222,19 @@ def run_loop(
             print(
                 f"[app] Latency: STT={stt_s:.2f}s | TTS={tts_s:.2f}s | "
                 f"play={play_s:.2f}s | total={total_s:.2f}s  "
-                f"(tier={ref_buffer.tier}, voiced={ref_buffer.voiced_seconds:.1f}s)"
+                f"(tier={ref_buffer.tier}, voiced={ref_buffer.voiced_seconds:.1f}s, "
+                f"alpha={alpha:.2f}, phase={engine.phase})"
             )
 
             if save_audio:
-                _save_wav(synth_wav, cloner.sample_rate, f"t{turn:02d}_output", out_dir)
+                _save_wav(synth_wav, cloner.sample_rate,
+                          f"t{logical_turn:02d}_p{engine.phase}_output", out_dir)
 
         except KeyboardInterrupt:
             print("\n[app] KeyboardInterrupt — shutting down.")
             break
         except Exception as exc:
-            print(f"[app] Error on turn {turn}: {exc!r} — continuing.")
-            turn -= 1
+            print(f"[app] Error on turn {logical_turn + 1}: {exc!r} — continuing.")
             continue
 
     # ── session summary ───────────────────────────────────────────────────────

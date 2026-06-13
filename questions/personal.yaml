@@ -1,0 +1,48 @@
+# Phase 2 — Personal questions (turns 3–5)
+#
+# Lightly intrusive. Should feel responsive — ideally the question hooks match
+# something the participant just said, so it feels like the machine listened.
+# The topic_hooks list enables the state machine to bias toward relevant entries.
+#
+# Artist note: the voice is sharpening at this point. The discomfort of
+# recognition should be building.
+
+- id: per_01
+  text: "What is something you have been meaning to say to someone, but haven't?"
+  topic_hooks: [say, tell, someone, person, words, silence]
+
+- id: per_02
+  text: "When did you last feel truly alone?"
+  topic_hooks: [alone, lonely, solitude, by myself, isolated]
+
+- id: per_03
+  text: "What is a small habit you have that almost no one else knows about?"
+  topic_hooks: [habit, routine, private, alone, secret, know]
+
+- id: per_04
+  text: "What was the last thing that made you feel genuinely proud of yourself?"
+  topic_hooks: [proud, accomplished, achievement, did, made]
+
+- id: per_05
+  text: "Is there something you have changed your mind about recently?"
+  topic_hooks: [changed, mind, think, believe, opinion, wrong]
+
+- id: per_06
+  text: "What is something you keep saying you will do, but never do?"
+  topic_hooks: [keep, saying, doing, want, try, someday]
+
+- id: per_07
+  text: "Who in your life sees you most clearly?"
+  topic_hooks: [person, people, family, friend, see, know, understand]
+
+- id: per_08
+  text: "What is something you want that you haven't admitted out loud?"
+  topic_hooks: [want, wish, need, hope, admit, say]
+
+- id: per_09
+  text: "When did you last do something that surprised you?"
+  topic_hooks: [surprise, unexpected, sudden, last time, did]
+
+- id: per_10
+  text: "What are you carrying right now that you wish you could put down?"
+  topic_hooks: [carrying, weight, burden, stress, tired, heavy]

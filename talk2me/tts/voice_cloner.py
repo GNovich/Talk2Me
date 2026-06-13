@@ -4,13 +4,19 @@ Feature 4: Replace the Tacotron2+WaveRNN+encoder chain with F5-TTS-MLX, a
 flow-matching TTS that clones a voice from a few seconds of reference audio
 with no separate vocoder and no fine-tuning.
 
+Feature 7: Neutral→self voice migration. synthesize() accepts migration_alpha
+(0.0 = neutral seed, 1.0 = full participant voice) to ramp the voice gradually.
+A neutral seed clip is loaded from assets/ if present.
+
 Public API:
-    VoiceCloner.synthesize(text, reference_wav, reference_text) -> np.ndarray
+    VoiceCloner.synthesize(text, reference_wav, reference_text,
+                           reference_sample_rate, migration_alpha) -> np.ndarray
 """
 from __future__ import annotations
 
 import pkgutil
 import time
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -41,11 +47,19 @@ def _resample(wav: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
     return resampled.astype(np.float32)
 
 
+_ASSETS_DIR = Path(__file__).parent.parent.parent / "assets"
+_NEUTRAL_SEED_WAV = _ASSETS_DIR / "neutral_seed.wav"
+_NEUTRAL_SEED_TXT = _ASSETS_DIR / "neutral_seed_text.txt"
+
+
 class VoiceCloner:
     """Wraps F5-TTS-MLX for zero-shot voice cloning.
 
     The model is loaded and JIT-warmed on the first synthesize() call (or
     explicitly via warm()). After that it is cached for the session lifetime.
+
+    Feature 7: if assets/neutral_seed.wav exists, synthesize() can blend the
+    neutral seed with the participant's reference via the migration_alpha param.
     """
 
     def __init__(
@@ -55,6 +69,7 @@ class VoiceCloner:
         cfg_strength: float = 2.0,
         speed: float = 1.0,
         seed: Optional[int] = None,
+        neutral_seed_path: Optional[Path] = None,
     ):
         self._model_id = model
         self._steps = steps
@@ -64,9 +79,43 @@ class VoiceCloner:
         self._f5tts = None       # loaded on first call
         self._cvt = None         # convert_char_to_pinyin helper
 
+        # Neutral seed for migration mode (Feature 7)
+        self._neutral_wav: Optional[np.ndarray] = None
+        self._neutral_text: str = ""
+        self._load_neutral_seed(neutral_seed_path or _NEUTRAL_SEED_WAV)
+
+    def _load_neutral_seed(self, wav_path: Path) -> None:
+        """Load the neutral seed clip for migration mode, if available."""
+        txt_path = wav_path.parent / (wav_path.stem + "_text.txt")
+        if not wav_path.exists():
+            print(f"[TTS] No neutral seed found at {wav_path} — migration falls back to alpha=1.0")
+            return
+        try:
+            import soundfile as sf
+            wav, sr = sf.read(str(wav_path), dtype="float32")
+            if wav.ndim > 1:
+                wav = wav[:, 0]  # take first channel if stereo
+            self._neutral_wav = _resample(wav, sr, SAMPLE_RATE)
+
+            if txt_path.exists():
+                self._neutral_text = txt_path.read_text(encoding="utf-8").strip()
+            else:
+                print(f"[TTS] Warning: neutral seed text not found at {txt_path}")
+                self._neutral_text = ""
+
+            print(f"[TTS] Neutral seed loaded: {len(self._neutral_wav)/SAMPLE_RATE:.1f}s")
+        except Exception as exc:
+            print(f"[TTS] Warning: could not load neutral seed — {exc}")
+            self._neutral_wav = None
+            self._neutral_text = ""
+
     @property
     def sample_rate(self) -> int:
         return SAMPLE_RATE
+
+    @property
+    def has_neutral_seed(self) -> bool:
+        return self._neutral_wav is not None
 
     def warm(self) -> None:
         """Load and JIT-compile the model with a throwaway synthesis.
@@ -121,6 +170,7 @@ class VoiceCloner:
         reference_wav: np.ndarray,
         reference_text: str,
         reference_sample_rate: int = 24_000,
+        migration_alpha: float = 1.0,
     ) -> np.ndarray:
         """Synthesize `text` in the voice described by `reference_wav`.
 
@@ -131,6 +181,11 @@ class VoiceCloner:
                 on both audio and its transcript).
             reference_sample_rate: Sample rate of `reference_wav`.  The audio is
                 resampled to 24 kHz internally if needed.
+            migration_alpha: Feature 7 blend factor. 0.0 = full neutral seed,
+                1.0 = full participant voice. Fractional values concatenate a
+                proportional mix of [neutral | participant] audio (neutral first
+                so the model "remembers" the participant voice at synthesis time).
+                If no neutral seed is loaded, alpha is treated as 1.0.
 
         Returns:
             Float32 numpy array at 24 kHz (SAMPLE_RATE).
@@ -153,12 +208,28 @@ class VoiceCloner:
         if rms > 0:
             ref = ref * (_TARGET_RMS / rms)
 
+        # 3. Feature 7: blend with neutral seed if migration_alpha < 1.0
+        if migration_alpha < 1.0 and self._neutral_wav is not None:
+            participant_len = max(0, int(len(ref) * migration_alpha))
+            neutral_len = min(len(self._neutral_wav), len(ref) - participant_len)
+            parts_wav: list[np.ndarray] = []
+            parts_text: list[str] = []
+            if neutral_len > 0:
+                parts_wav.append(self._neutral_wav[:neutral_len])
+                parts_text.append(self._neutral_text)
+            if participant_len > 0:
+                parts_wav.append(ref[:participant_len])
+                parts_text.append(reference_text)
+            if parts_wav:
+                ref = np.concatenate(parts_wav)
+                reference_text = " ".join(parts_text).strip()
+
         ref_mx = mx.array(ref)
 
-        # 3. Build combined text prompt: reference text + generation text
+        # 4. Build combined text prompt: reference text + generation text
         combined = self._cvt([reference_text + " " + text])
 
-        # 4. Estimate duration via frame-count heuristic
+        # 5. Estimate duration via frame-count heuristic
         ref_frames = ref_mx.shape[0] // _HOP_LENGTH
         ref_char_len = len(reference_text.encode("utf-8"))
         gen_char_len = len(text.encode("utf-8"))
@@ -168,7 +239,7 @@ class VoiceCloner:
             gen_frames = int(gen_char_len * _FRAMES_PER_SEC / 10)
         duration = ref_frames + gen_frames
 
-        # 5. Sample
+        # 6. Sample
         wave, _ = self._f5tts.sample(
             mx.expand_dims(ref_mx, axis=0),
             text=combined,
@@ -181,7 +252,7 @@ class VoiceCloner:
             seed=self._seed,
         )
 
-        # 6. Trim reference prefix and materialise
+        # 7. Trim reference prefix and materialise
         wave = wave[ref_mx.shape[0]:]
         mx.eval(wave)
 

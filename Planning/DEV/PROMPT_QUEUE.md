@@ -1,4 +1,4 @@
-# PROMPT QUEUE — updated 2026-06-12
+# PROMPT QUEUE — updated 2026-06-13
 
 > Tasks are pulled in binding order from `ROADMAP.md`. Do not start a feature
 > before all earlier ones are `COMPLETED`. Max 3 active tasks at a time.
@@ -58,73 +58,108 @@ Wired into `app.py`. Audible sharpening verification deferred to exhibit Mac.
 ---
 
 ## TASK 7 — Neutral→self voice migration  (ROADMAP Feature 7)
-**Status:** PENDING — PLAN ONLY
+**Status:** COMPLETED 2026-06-13
 
-**Plan:**
-- Add a `neutral_seed_wav` (float32, 24 kHz) and `neutral_seed_text` (str) to
-  `VoiceCloner` — loaded from `assets/neutral_seed.wav` if present; generated
-  once with Kokoro (from PdfReader) or bundled from the F5-TTS test clip.
-- Add `migration_alpha` parameter to `VoiceCloner.synthesize()`: 0.0 = full
-  neutral seed, 1.0 = full participant reference.  At fractional values, blend
-  the two reference clips by weighted concatenation (simple approach that F5-TTS
-  already handles via the ref-audio conditioning; no need to interpolate latent
-  space).
-- `ReferenceBuffer` exposes `migration_alpha(tier)` helper: maps tier 0→0.2,
-  1→0.5, 2→0.8, 3→1.0 (all configurable in `exhibit.yaml` under
-  `engine.migration_alphas`).
-- `app.py` checks `cfg.engine.migration` flag:
-  - `false`: pass `alpha=1.0` always (clone from turn 1, current behaviour)
-  - `true`: call `ref_buffer.migration_alpha(ref_buffer.tier)` each turn
-- `assets/neutral_seed.wav` + `neutral_seed_text.txt` to be generated/placed by
-  the operator; if missing, migration silently falls back to alpha=1.0 with a
-  warning.
-- Expose toggle in `config/exhibit.yaml`: `engine.migration: true|false`.
-- **Verify:** scripted test that at tier 0 alpha=0.2 and at tier 3 alpha=1.0;
-  audible ramp verification on exhibit Mac.
+`migration_alpha` blend parameter in `VoiceCloner.synthesize()`. Proportional
+neutral+participant audio concatenation. `ReferenceBuffer.migration_alpha(tier)`
+maps tier→alpha. Toggle in `exhibit.yaml`. Neutral seed files not bundled —
+operator generates with Kokoro and places in `assets/`. Audible ramp deferred.
 
 ---
 
 ## TASK 8 — Curated question bank  (ROADMAP Feature 8)
-**Status:** PENDING — PLAN ONLY
+**Status:** COMPLETED 2026-06-13
 
-**Plan:**
-- `questions/calibration.yaml`, `questions/personal.yaml`,
-  `questions/confrontational.yaml` — each a YAML list of dicts with keys
-  `text` (str) and optional `topic_hooks` (list of keywords for Feature 9
-  matching).
-- `talk2me/engine/question_bank.py`: `QuestionBank` class.
-  - `load(questions_dir)` reads all three YAML files, validates schema
-    (every entry must have `text`; phase inferred from filename).
-  - `select(phase, used_ids, topic_hints=[])` returns the next unused entry
-    in the given phase; deterministic non-repeating order; when exhausted,
-    cycles (or signals exhaustion if Feature 9 wants to advance phase).
-  - Hot-reloadable: `reload()` re-reads YAML files without restarting.
-  - Generate first-draft question content for all three phases as part of
-    implementation (artist will tune between sessions).
-- Schema validator: raises `ValueError` on malformed entries.
-- **Verify:** unit tests with synthetic YAML; assert correct selection order,
-  no-repeat until exhaustion, phase boundary handling.
+`questions/calibration.yaml` (6Q), `questions/personal.yaml` (10Q),
+`questions/confrontational.yaml` (12Q). `QuestionBank` with schema validation,
+non-repeating selection, topic-hint biasing, hot-reload. 15 tests pass.
 
 ---
 
 ## TASK 9 — Conversation state machine  (ROADMAP Feature 9)
+**Status:** COMPLETED 2026-06-13
+
+`ConversationEngine` in `talk2me/engine/state_machine.py`. Phase tracking,
+topic-biased question selection, idle-timeout reset. Wired into `app.py`;
+placeholder question replaced. 6 unit tests pass.
+
+---
+
+## TASK 10 — Optional LLM-adaptive question selection  (ROADMAP Feature 10)
 **Status:** PENDING — PLAN ONLY
 
 **Plan:**
-- `talk2me/engine/state_machine.py`: `ConversationEngine` class.
-  - Tracks: `turn`, `phase` (1–3), `elapsed_s`, `transcript_history` (list of
-    strings), `used_question_ids` (per phase).
-  - Phase transitions: phase 1 → 2 after `calibration_turns` turns (from config);
-    phase 2 → 3 after `personal_turns` turns.
-  - `next_question(transcript_history) -> str`: calls `QuestionBank.select()`
-    biased toward entries whose `topic_hooks` match recent transcripts
-    (naive keyword scan — `str.lower()` contains check, no NLP library required).
-  - `record_turn(wav, transcript, question_asked)` updates internal state.
-  - `should_reset() -> bool`: True if `elapsed_s > idle_timeout_seconds` config key.
-  - `reset()`: clears all state for a new participant.
-  - No audio dependencies — pure logic, fully unit-testable with scripted
-    transcript strings.
-- Wire into `app.py`: replace hard-coded placeholder question with
-  `engine.next_question(transcript_history)`.
-- **Verify:** unit tests feeding scripted transcripts; assert phase advancement
-  on turn thresholds, topic-hook biasing, reset on timeout.
+- Gate the entire feature behind `engine.llm: false` in `exhibit.yaml`;
+  when false (default), skip all LLM code and use Feature 9's pure selector.
+- New file `talk2me/engine/llm_adapter.py`: `LLMAdapter` class.
+  - `__init__(model_id, max_new_tokens, device)`: loads `mlx_lm` model +
+    tokenizer once; keep as default `mlx-community/Llama-3.2-3B-Instruct-4bit`.
+  - `personalize(candidate_question, transcript_history, phase) -> str`:
+    - Builds a tightly constrained system prompt: "You are editing a single
+      question. Preserve its exact meaning, tone, and phase intensity. Do NOT
+      invent new topics. Return only the question text, nothing else."
+    - Interpolates `candidate_question` and last 3 transcript turns as context.
+    - Caps generation at ~50 tokens; strips any preamble from the output.
+    - Falls back to `candidate_question` unchanged if the model returns empty
+      or the output is >3× longer than the input (drift guard).
+  - `warm()`: run one throwaway call at startup to JIT-compile.
+- `ConversationEngine.next_question()` checks `use_llm` flag (passed at init);
+  if true, wraps the bank selection output with `LLMAdapter.personalize()`.
+- Log both the original bank text and the adapted text per turn to
+  `saved_audio/` or a structured log file for curatorial review.
+- Budget: LLM call must complete in ≤1 s on M2/M3 (3B 4-bit is ~0.3 s);
+  run concurrently with TTS warm-up if possible.
+- **Verify:** unit test that with `engine.llm: false` the adapter is never
+  instantiated; scripted test that the fall-back triggers correctly on long
+  output; on-hardware latency test that LLM call stays within budget.
+
+---
+
+## TASK 11 — Kiosk runtime & session lifecycle  (ROADMAP Feature 11)
+**Status:** PENDING — PLAN ONLY
+
+**Plan:**
+- Headless mode: no GUI; suppress Python tracebacks to stdout in kiosk mode;
+  redirect logs to a file (`logs/session_YYYY-MM-DD.log`).
+- Supervisor loop: the `run_loop()` already has try/except per turn; add an
+  outer restart loop so an uncaught fatal error restarts the pipeline within
+  5 s (max 3 restarts before standby).
+- Idle/reset behaviour: Feature 9's `should_reset()` + `reset()` already handle
+  per-session clearing; Feature 11 adds a longer *standby* state (>5 min total
+  silence) where the installation plays a neutral ambient tone to signal
+  readiness.
+- Launch-on-boot: write a `launchd` plist at
+  `scripts/com.talk2me.exhibit.plist` that sets `RunAtLoad=true` and
+  `KeepAlive=true`; include an `install_launchd.sh` helper.
+- Attendant reset key: listen for a configurable key chord (default `Ctrl+R`)
+  at the outer loop; immediately wipe session and return to idle.
+- **Verify:** confirm outer restart loop recovers from an injected
+  `RuntimeError`; confirm launchd plist is valid XML (`plutil -lint`).
+
+---
+
+## TASK 12 — Consent, safety & privacy layer  (ROADMAP Feature 12)
+**Status:** PENDING — PLAN ONLY
+
+**Plan:**
+- `talk2me/app.py`: add a `consent_gate()` function called before each session
+  start. In headless/kiosk mode: display text on stdout ("Press ENTER to begin
+  and confirm you consent to voice recording for this session. Press Q to quit.")
+  and wait for input. In attended mode: the gallery attendant confirms.
+- Panic key (`Ctrl+C` already handled; add `Ctrl+P` or configurable key):
+  immediately stops playback (`Speaker.stop()`), wipes `ReferenceBuffer`,
+  resets `ConversationEngine`, and prints a clear attendant message.
+- Session-end purge: add `_purge_session(ref_buffer, engine)` that calls
+  `ref_buffer.reset()` and `engine.reset()`. Called on: normal end, panic,
+  idle timeout reset, and outer-loop restart.
+- Opt-in logging: add `privacy.save_transcripts: false` to `exhibit.yaml`;
+  when false (default), transcripts are never written to disk. When true,
+  anonymized (no timestamps, no names) transcripts are appended to
+  `logs/transcripts_YYYY-MM-DD.log`.
+- Assert network egress: add a startup check that raises `RuntimeError` if any
+  of the model load paths resolve to a non-local URL (i.e., require download
+  at runtime rather than from cache).
+- Document data handling in `PRIVACY.md` at project root for the gallery.
+- **Verify:** unit test that `_purge_session` calls reset on both objects;
+  confirm that with `privacy.save_transcripts: false`, no transcript files are
+  created after a simulated session.

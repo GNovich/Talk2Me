@@ -4,11 +4,15 @@ Feature 6: maintain a quality-ranked buffer of participant utterances.  As
 audio accumulates across tiers (3 s → 9 s → 20 s+), the reference passed to
 F5-TTS sharpens from a rough approximation into an uncannily exact clone.
 
+Feature 7: migration_alpha(tier) maps each sharpening tier to a blend factor
+for VoiceCloner.synthesize(), ramping from neutral→self as reference accumulates.
+
 Public API:
     ReferenceBuffer.push(wav, transcript_result) -> None
     ReferenceBuffer.best_reference() -> tuple[np.ndarray, str] | tuple[None, None]
     ReferenceBuffer.voiced_seconds -> float
     ReferenceBuffer.tier -> int  (0 = no ref, 1-3 = progressive tiers)
+    ReferenceBuffer.migration_alpha(tier) -> float
     ReferenceBuffer.reset() -> None
 """
 from __future__ import annotations
@@ -34,6 +38,9 @@ _TIER_THRESHOLDS = (3.0, 9.0, 20.0)
 
 # Cap on total reference audio fed to F5-TTS (longer hurts quality)
 _MAX_REFERENCE_SECONDS = 30.0
+
+# Feature 7: default migration alpha per tier (0=neutral→self=1.0)
+_DEFAULT_MIGRATION_ALPHAS = (0.2, 0.5, 0.8, 1.0)  # tier 0, 1, 2, 3
 
 
 @dataclass
@@ -65,12 +72,14 @@ class ReferenceBuffer:
         min_avg_logprob: float = _MIN_AVG_LOGPROB,
         min_rms: float = _MIN_RMS,
         max_peak: float = _MAX_PEAK,
+        migration_alphas: Tuple[float, ...] = _DEFAULT_MIGRATION_ALPHAS,
     ):
         self._tier_thresholds = tier_thresholds
         self._max_ref_s = max_reference_seconds
         self._min_logprob = min_avg_logprob
         self._min_rms = min_rms
         self._max_peak = max_peak
+        self._migration_alphas = migration_alphas
 
         self._segments: list[_Segment] = []
         self._voiced_seconds: float = 0.0
@@ -169,6 +178,16 @@ class ReferenceBuffer:
             if self._voiced_seconds >= threshold:
                 return len(self._tier_thresholds) - i + 1
         return 0
+
+    def migration_alpha(self, tier: Optional[int] = None) -> float:
+        """Return the blend factor for the given tier (Feature 7).
+
+        0.0 = full neutral seed, 1.0 = full participant voice.
+        If tier is None, uses the current buffer tier.
+        """
+        t = self.tier if tier is None else tier
+        t = max(0, min(t, len(self._migration_alphas) - 1))
+        return self._migration_alphas[t]
 
     def reset(self) -> None:
         """Clear all accumulated audio — call at session end."""

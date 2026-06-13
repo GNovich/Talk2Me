@@ -1,0 +1,31 @@
+# Phase 1 — Calibration questions (turns 1–2)
+#
+# Primary purpose: harvest clean, natural reference audio from the participant.
+# Secondary purpose: ease them into the conversation with comfortable prompts.
+# Topic hooks are light — matching here is not critical.
+#
+# Artist note: these questions must sound genuinely curious, not clinical.
+
+- id: cal_01
+  text: "What brought you here today?"
+  topic_hooks: [here, today, reason, visit]
+
+- id: cal_02
+  text: "Describe the room you're sitting in."
+  topic_hooks: [room, space, place, sitting, here]
+
+- id: cal_03
+  text: "What did you do this morning before you arrived here?"
+  topic_hooks: [morning, today, before, routine]
+
+- id: cal_04
+  text: "What is the first thing you noticed when you walked in?"
+  topic_hooks: [first, noticed, walked, arrived, saw]
+
+- id: cal_05
+  text: "Is there anything you were hoping this would be, before you sat down?"
+  topic_hooks: [hoping, expecting, before, imagine]
+
+- id: cal_06
+  text: "What does the light look like where you are right now?"
+  topic_hooks: [light, room, see, look]

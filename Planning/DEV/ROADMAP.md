@@ -152,7 +152,7 @@ conceptual ancestor (then supersede it).
 first synthesis from a slightly neutral/blended reference so the migration toward
 the participant's exact voice is perceptible. Expose tier thresholds in `config/`.
 
-### 7. Neutral→self voice migration (the unsettling ramp)
+### 7. Neutral→self voice migration (the unsettling ramp) **[COMPLETED 2026-06-13: `migration_alpha` param added to VoiceCloner.synthesize(); when alpha<1.0 and assets/neutral_seed.wav is present, blends [neutral|participant] audio proportionally. ReferenceBuffer.migration_alpha(tier) maps tier 0→0.2, 1→0.5, 2→0.8, 3→1.0 (configurable via engine.migration_alphas in exhibit.yaml). Toggle engine.migration: true|false. assets/README.md explains how to generate the neutral seed with Kokoro. Neutral seed files not bundled — operator must place before exhibit. Audible ramp verification deferred to exhibit Mac.]**
 **Description.** Optional but central to the intended discomfort: rather than
 cloning the participant from turn 1, begin with a near-neutral voice and
 interpolate toward their exact voice as reference accumulates, so the participant
@@ -172,7 +172,7 @@ toggle clearly and document both modes' intended effect for the exhibit operator
 
 ## Phase 3 — The Question Engine
 
-### 8. Curated question bank (three escalating phases)
+### 8. Curated question bank (three escalating phases) **[COMPLETED 2026-06-13: questions/calibration.yaml (6 Q), questions/personal.yaml (10 Q), questions/confrontational.yaml (12 Q) — all entries have id, text, topic_hooks. QuestionBank.load(dir) validates schema, raises ValueError on bad entries. select(phase, used_ids, topic_hints) returns (id, text) biased toward topic_hook overlaps, falls back to deterministic first-unused, cycles on exhaustion. reload() for hot-reload without restart. 15 unit tests pass. Question content is first-draft; artist to tune between sessions.]**
 **Description.** Author and structure the pre-written questions that drive the
 piece. Three tiers as data (YAML/JSON in `questions/`), each entry tagged with
 phase, intensity, and topic hooks:
@@ -193,7 +193,7 @@ none provided.
 tone between gallery sessions without touching code. Include a content/consent
 note: Phase 3 is intense by design — pair with the safety features in Phase 4.
 
-### 9. Conversation state machine
+### 9. Conversation state machine **[COMPLETED 2026-06-13: ConversationEngine in talk2me/engine/state_machine.py. Tracks turn, phase (1-3), transcript_history, used_question_ids. Phase advances: P1 for turns ≤calibration_turns, P2 for turns ≤cal+personal, P3 thereafter. next_question() calls QuestionBank.select() with topic hints from last 3 transcripts (words ≥4 chars). record_turn(transcript, question) updates state. should_reset() checks monotonic idle timeout. reset() clears all state. Wired into app.py replacing placeholder question; idle-timeout session reset also wired. 6 unit tests pass. Speaker now created once at 24 kHz (was re-created each turn). Latency log includes alpha= and phase=.]**
 **Description.** The director that decides *what to ask next*. Tracks turn count,
 current phase, elapsed time, topics surfaced (naive keyword/topic extraction over
 the Whisper transcript history), and which questions have fired. Advances phases
@@ -307,3 +307,9 @@ smoke-test, panic/reset, shutdown.
   36 unit tests pass. All audible verification and latency measurement deferred to
   exhibit Mac. Next: Features 7 (neutral→self migration), 8 (question bank),
   9 (state machine).
+- 2026-06-13 — Automated session. Features 7, 8, 9 implemented and committed.
+  Migration blending in VoiceCloner; ReferenceBuffer.migration_alpha(tier);
+  three-phase question YAML bank (6+10+12 questions); QuestionBank loader with
+  hot-reload; ConversationEngine state machine with topic-biased selection and
+  idle-timeout reset. app.py fully wired. 66 unit tests pass. All audible
+  verification deferred to exhibit Mac. Next: Features 10–12.
