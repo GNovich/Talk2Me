@@ -18,9 +18,21 @@ tts:
   warmup_text: "Hello, I am listening."
 
 engine:
-  llm: false                  # enable mlx-lm adaptive question selection
+  llm: false                  # enable mlx-lm adaptive question selection (Feature 10)
+  llm_model: "mlx-community/Llama-3.2-3B-Instruct-4bit"
   migration: true             # true = ramp neutral→self voice; false = clone from turn 1
   migration_alphas: [0.2, 0.5, 0.8, 1.0]  # alpha per tier 0–3 (0=neutral, 1=participant)
   calibration_turns: 2        # questions whose primary job is reference audio harvest
   personal_turns: 3           # turns 3–5
   idle_timeout_seconds: 60    # reset session after this much silence
+
+# Feature 11 — kiosk runtime
+# Set to true on the dedicated exhibit Mac; false for development.
+kiosk: false
+
+# Feature 12 — privacy & consent
+privacy:
+  save_transcripts: false     # MUST remain false unless participant opts in
+  # When true, anonymized (no timestamps, no names) transcripts are appended to
+  # logs/transcripts_YYYY-MM-DD.log for post-exhibit curatorial review.
+  # This must only be enabled with explicit participant consent per the PRIVACY.md policy.

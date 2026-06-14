@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Talk2Me art installation — launchd service (Feature 11)
+         Install: sudo cp com.talk2me.exhibit.plist /Library/LaunchDaemons/
+                  sudo launchctl load /Library/LaunchDaemons/com.talk2me.exhibit.plist
+
+         To reset a session from another terminal:
+             kill -USR1 $(pgrep -f "talk2me --kiosk")
+
+         To trigger a panic purge:
+             kill -USR2 $(pgrep -f "talk2me --kiosk")
+
+         To shut down cleanly:
+             sudo launchctl stop com.talk2me.exhibit
+    -->
+
+    <key>Label</key>
+    <string>com.talk2me.exhibit</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Replace /opt/homebrew/bin/uv with the actual uv/python path on the exhibit Mac -->
+        <string>/opt/homebrew/bin/uv</string>
+        <string>run</string>
+        <string>talk2me</string>
+        <string>--kiosk</string>
+        <string>--config</string>
+        <string>/Users/exhibit/Talk2Me/config/exhibit.yaml</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/exhibit/Talk2Me</string>
+
+    <!-- Restart automatically if the process exits for any reason -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Start at boot -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Throttle restarts to avoid a rapid crash loop -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Route stdout/stderr to dated log files -->
+    <key>StandardOutPath</key>
+    <string>/Users/exhibit/Talk2Me/logs/launchd_stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/exhibit/Talk2Me/logs/launchd_stderr.log</string>
+
+    <!-- Run as the exhibit user, not root -->
+    <key>UserName</key>
+    <string>exhibit</string>
+
+    <!-- Give the process time to shut down gracefully on SIGTERM -->
+    <key>ExitTimeOut</key>
+    <integer>15</integer>
+</dict>
+</plist>

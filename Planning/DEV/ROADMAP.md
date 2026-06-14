@@ -207,7 +207,7 @@ dependencies — feed it transcripts, assert the chosen question.
 **Extra.** Make phase thresholds and escalation pacing config-driven so the arc
 can be lengthened/shortened per exhibit constraints.
 
-### 10. Optional LLM-adaptive question selection (`mlx-lm`)
+### 10. Optional LLM-adaptive question selection (`mlx-lm`) **[COMPLETED 2026-06-14: LLMAdapter in talk2me/engine/llm_adapter.py wraps mlx_lm (Llama-3.2-3B-Instruct-4bit). Tight system prompt preserves tone; drift guard falls back to original on empty/too-long/no-question-mark output. Wired into ConversationEngine via llm_adapter= param; both original and adapted texts logged per turn. Gated by engine.llm: false (default). engine.llm_model configurable in exhibit.yaml. warm() JIT-compiles at startup. 5 unit tests pass. On-hardware latency verification deferred to exhibit Mac.]**
 **Description.** Upgrade the engine from "select from bank" to "select *and
 lightly adapt* from bank" so questions feel responsive rather than scripted. A
 local `mlx-lm` model (Llama-3.2-3B-Instruct or Gemma-2-2B, 4-bit) reads the
@@ -229,7 +229,7 @@ original bank line and the adapted line for curatorial review.
 
 ## Phase 4 — Exhibit Hardening
 
-### 11. Kiosk runtime & session lifecycle
+### 11. Kiosk runtime & session lifecycle **[COMPLETED 2026-06-14: supervisor_loop() in app.py with max-3-consecutive-crash guard and _standby_loop() (ambient 440 Hz pulse). SIGUSR1=session reset, SIGUSR2=panic/purge, SIGTERM=shutdown. _setup_logging() routes to logs/session_YYYY-MM-DD.log in kiosk mode, suppresses raw tracebacks. launchd plist at scripts/com.talk2me.exhibit.plist (KeepAlive, RunAtLoad, ThrottleInterval=10; plutil-lint validated). scripts/install_launchd.sh attendant helper. --kiosk CLI flag routes to supervisor_loop(). kiosk: false toggle in exhibit.yaml. 2 unit tests pass (crash recovery, plist XML). On-hardware launchd install and boot test deferred to exhibit Mac.]**
 **Description.** Turn the script into an unattended installation. Fullscreen /
 headless kiosk mode with no visible developer UI (the participant should see at
 most a minimal ambient visual, or nothing). Robust session lifecycle: greet →
@@ -242,7 +242,7 @@ crashing the installation. Launch-on-boot for a dedicated Mac Mini.
 **Extra.** A physical/hardware reset affordance (keyboard cue or footswitch) for
 the gallery attendant.
 
-### 12. Consent, safety & privacy layer
+### 12. Consent, safety & privacy layer **[COMPLETED 2026-06-14: consent_gate() blocks on ENTER before each session; returns False on q/quit/EOFError. _purge_session(ref_buffer, engine) calls reset() on both objects; called in finally block on every exit path. SIGUSR2 panic immediately purges and returns to standby. _log_transcript() opt-in only (privacy.save_transcripts: false default); when true writes anonymized text to logs/transcripts_YYYY-MM-DD.log. _assert_no_network_egress() startup check validates HF cache presence for STT model. PRIVACY.md gallery-facing data-handling document. privacy section added to exhibit.yaml. 7 unit tests pass. Secure-delete of transcript files and on-hardware network-off test deferred to exhibit Mac.]**
 **Description.** Non-negotiable for a piece that clones voices and asks intimate
 questions. Explicit on-screen/printed consent before a session; a visible/audible
 way to stop at any time; automatic purge of all captured audio and transcripts at
@@ -313,3 +313,9 @@ smoke-test, panic/reset, shutdown.
   hot-reload; ConversationEngine state machine with topic-biased selection and
   idle-timeout reset. app.py fully wired. 66 unit tests pass. All audible
   verification deferred to exhibit Mac. Next: Features 10–12.
+- 2026-06-14 — Automated session. Features 10, 11, 12 implemented and committed.
+  LLMAdapter (mlx-lm, drift-guarded); supervisor_loop with crash recovery and
+  standby mode; launchd plist; consent_gate, _purge_session, opt-in transcript
+  logging, network-egress assertion; PRIVACY.md. 81 tests pass (1 pre-existing
+  failure unrelated to this session). All on-hardware verification deferred to
+  exhibit Mac. Next: Features 13–14 (telemetry dashboard, packaging).
