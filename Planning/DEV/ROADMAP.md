@@ -255,7 +255,7 @@ pipeline is fully local. Document data handling for the gallery.
 **Extra.** A "panic" key that immediately stops playback, wipes the session, and
 returns to idle — within reach of the attendant at all times.
 
-### 13. Telemetry, logging & latency dashboard
+### 13. Telemetry, logging & latency dashboard **[COMPLETED 2026-06-15: TelemetryLogger in talk2me/telemetry.py. log_turn() appends one JSON line per turn to logs/telemetry_YYYY-MM-DD.jsonl (latency + phase only, zero participant data). One-line health banner [OK]/[SLOW]/[!!] printed after each turn. session_summary() computes per-stage averages. print_report() prints human-readable per-turn table; handles missing/empty file gracefully. Wired into app.py run_loop() (both dev and kiosk modes) and supervisor_loop(). talk2me --report YYYY-MM-DD CLI digest command. 13 unit tests pass. On-hardware latency budget verification deferred to exhibit Mac.]**
 **Description.** Opt-in, anonymized instrumentation for tuning the piece between
 sessions and for any post-exhibit artist analysis: per-turn latency breakdown
 (STT / engine / TTS / playback), phase progression timing, which questions landed,
@@ -267,7 +267,7 @@ Feature 5.
 **Extra.** Surface a live "is the pipeline healthy / within latency budget"
 indicator for the attendant, distinct from anything the participant sees.
 
-### 14. Packaging & deployment
+### 14. Packaging & deployment **[COMPLETED 2026-06-15: uv.lock generated (85 packages, Python 3.13.13). scripts/prefetch_models.py downloads Whisper, F5-TTS-MLX, Silero VAD ONNX; --llm flag also fetches LLM; --dry-run lists without downloading; reads model IDs from exhibit.yaml. scripts/smoke_test.sh: 6 checks (import, audio devices, speaker tone, Whisper load, F5-TTS load, launchd plist); 6/6 pass on dev machine. RUNBOOK.md written for non-developer attendant (startup, reset, panic, report, shutdown, troubleshooting). Signed .app/DMG deferred; uv env is minimum viable deploy.]**
 **Description.** Make the installation reproducible and deployable to gallery
 hardware without a developer present. A pinned, locked dependency set; a one-
 command setup that pre-downloads all MLX model weights (Whisper, F5-TTS, optional
@@ -319,3 +319,9 @@ smoke-test, panic/reset, shutdown.
   logging, network-egress assertion; PRIVACY.md. 81 tests pass (1 pre-existing
   failure unrelated to this session). All on-hardware verification deferred to
   exhibit Mac. Next: Features 13–14 (telemetry dashboard, packaging).
+- 2026-06-15 — Automated session. Features 13 and 14 implemented and committed.
+  TelemetryLogger (JSONL latency log, health banner, --report CLI digest);
+  uv.lock (85 packages); scripts/prefetch_models.py; scripts/smoke_test.sh
+  (6/6 pass on dev machine); RUNBOOK.md for gallery attendant. 94 tests pass
+  (1 pre-existing failure). All 14 roadmap features COMPLETED. Remaining items
+  are operational (on-hardware verification, asset placement, launchd install).

@@ -23,6 +23,11 @@ Feature 12 wired: consent_gate() before each session, SIGUSR2 panic / purge,
 _purge_session() ensures buffers are wiped on every exit path, opt-in
 transcript logging, and startup network-egress assertion.
 
+Feature 13 wired: TelemetryLogger appends one JSON line per turn to
+logs/telemetry_YYYY-MM-DD.jsonl (latency + phase only, no participant data).
+A one-line health banner ([OK]/[SLOW]/[!!]) is printed after each turn.
+``talk2me --report YYYY-MM-DD`` prints the full per-turn table.
+
 Latency is instrumented at every stage; per-turn breakdown is printed and
 accumulated for the session log.
 """
@@ -199,6 +204,7 @@ def run_loop(
     max_turns: Optional[int] = None,
     save_audio: bool = True,
     skip_consent: bool = False,
+    telemetry_logger=None,
 ) -> None:
     """Run one full Talk2Me session (consent → turns → purge).
 
@@ -440,6 +446,18 @@ def run_loop(
                     f"(tier={ref_buffer.tier}, voiced={ref_buffer.voiced_seconds:.1f}s, "
                     f"alpha={alpha:.2f}, phase={engine.phase})"
                 )
+                if telemetry_logger is not None:
+                    banner = telemetry_logger.log_turn(
+                        turn=logical_turn,
+                        phase=engine.phase,
+                        tier=ref_buffer.tier,
+                        alpha=alpha,
+                        stt_s=stt_s,
+                        tts_s=tts_s,
+                        play_s=play_s,
+                        total_s=total_s,
+                    )
+                    print(f"[telemetry] {banner}")
 
                 if save_audio:
                     _save_wav(
@@ -505,6 +523,9 @@ def supervisor_loop(
     consecutive_crashes = 0
     first_run = True
 
+    from talk2me.telemetry import TelemetryLogger
+    tlog = TelemetryLogger(project_root / "logs")
+
     print(f"[supervisor] Talk2Me starting (PID {os.getpid()}).")
     print(f"[supervisor]   SIGUSR1 = attendant reset  |  SIGUSR2 = panic/purge  |  SIGTERM = shutdown")
 
@@ -514,6 +535,7 @@ def supervisor_loop(
                 config_path=config_path,
                 save_audio=save_audio,
                 skip_consent=not first_run,  # attendant already consented at startup
+                telemetry_logger=tlog,
             )
             consecutive_crashes = 0
             first_run = False
@@ -580,7 +602,18 @@ def main() -> None:
         action="store_true",
         help="Run in supervised kiosk mode with crash-restart and file logging.",
     )
+    parser.add_argument(
+        "--report",
+        metavar="YYYY-MM-DD",
+        help="Print the latency report for the given date and exit.",
+    )
     args = parser.parse_args()
+
+    if args.report:
+        from talk2me.telemetry import TelemetryLogger
+        project_root = Path(__file__).parent.parent
+        TelemetryLogger(project_root / "logs").print_report(args.report)
+        return
 
     if args.kiosk:
         supervisor_loop(
@@ -589,10 +622,14 @@ def main() -> None:
         )
     else:
         _install_signal_handlers()
+        project_root = Path(__file__).parent.parent
+        from talk2me.telemetry import TelemetryLogger
+        tlog = TelemetryLogger(project_root / "logs")
         run_loop(
             config_path=args.config,
             max_turns=args.max_turns,
             save_audio=not args.no_save_audio,
+            telemetry_logger=tlog,
         )
 
 
