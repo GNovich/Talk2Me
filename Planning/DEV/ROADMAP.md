@@ -285,6 +285,99 @@ smoke-test, panic/reset, shutdown.
 
 ---
 
+## Phase 5 — Polish & Simulation
+
+### 15. Voice recording library for simulation and testing
+**Description.** All audible verification has been deferred to the exhibit Mac
+because development runs without live participants. Fix that gap by building a
+small library of pre-recorded voice segments that can stand in for a real
+participant: a handful of 5–30 s clips covering different speakers, accents, and
+speaking styles (calm, nervous, quiet, loud). Store them in `tests/fixtures/voices/`
+as WAV files with matching transcripts. Wire a `SimulatedParticipant` helper that
+replays a clip through the full pipeline (`record_utterance` bypassed; clip fed
+directly to the `Transcriber` → `ReferenceBuffer` → `VoiceCloner` path) and
+saves the synthesized output to `saved_audio/sim_*`. This enables offline
+regression testing of voice clone quality, latency, and migration without
+needing a microphone or a live session.
+**Tools.** `soundfile` for loading fixtures; existing `Transcriber` / `VoiceCloner`
+/ `ReferenceBuffer`; `pytest` for regression harness.
+**Sources.** Public-domain voice samples (LibriSpeech test-clean, CMU ARCTIC, or
+self-recorded clips from the team). Minimum 3 speakers; at least one female, one
+male, one non-native English.
+**Extra.** Keep fixture clips short (≤30 s total per speaker) so the test suite
+stays fast. Tag tests that use these fixtures with `@pytest.mark.simulation` so
+they can be run separately from unit tests. Latency numbers from simulation
+runs are the primary benchmark until exhibit hardware is available.
+
+### 16. Operator/attendant UI
+**Description.** A lightweight local web dashboard (or rich TUI) giving the
+attendant real-time visibility and control without touching the terminal. Panels:
+**Status** — current phase, turn count, reference tier, migration alpha, session
+timer. **Chat view** — running transcript of participant speech and questions
+asked (attendant-only; never shown to participant). **Controls** — Start session,
+Reset (SIGUSR1), Panic purge (SIGUSR2), Shutdown (launchctl stop). **Health** —
+live latency banner ([OK]/[SLOW]/[!!]) mirroring the telemetry log. Implement
+as a minimal local HTTP server (`http.server` or `FastAPI`) serving a single-page
+dashboard that polls a lightweight JSON status endpoint the `run_loop` updates
+each turn. Gate behind a `ui: true` toggle in `exhibit.yaml`; the install runs
+headless by default.
+**Tools.** `fastapi` + `uvicorn` (or stdlib `http.server`); a small JS polling
+frontend (no build step — single static HTML file served alongside). SIGUSR1/2
+sent via `subprocess.run(["kill", "-USR1", pid])` from the UI backend.
+**Sources.** Feature 13 telemetry JSONL for the health feed; Feature 11 signal
+handlers for the control actions; Feature 12 transcript log for the chat view.
+**Extra.** The UI is for the attendant only — it must be on a separate screen or
+device that the participant cannot see. Document this constraint in the runbook.
+
+### 17. Latency reduction and output fidelity
+**Description.** Profile every stage of the hot path and push toward a
+consistent <2 s total round-trip. Concrete targets: (a) **Streaming TTS
+playback** — begin playing the first synthesized audio chunk while F5-TTS is
+still generating the remainder, eliminating the full-synthesis wait. (b)
+**Overlap STT + question selection** — run `ConversationEngine.next_question()`
+(and optionally `LLMAdapter.personalize()`) concurrently with the tail end of
+Whisper transcription using `threading`. (c) **Whisper model sizing** — expose
+a `stt.model_fast` config key for a smaller Whisper variant (e.g.
+`whisper-small`) used during early calibration turns when transcription accuracy
+is less critical; switch to the full model for later phases. (d) **F5-TTS
+step tuning** — expose `tts.nfe_steps` in `exhibit.yaml` (default 32; try 16
+for a speed/quality trade-off); document the audible effect. Measure and report
+per-stage latency before and after each optimisation; any change that increases
+latency by >5 % is a regression and must be reverted.
+**Tools.** `threading`, `queue`; `time.perf_counter` profiling already in place;
+F5-TTS `nfe_step` parameter; Whisper model variants on `mlx-community`.
+**Sources.** Feature 5 latency instrumentation; Feature 13 telemetry log as the
+before/after benchmark.
+**Extra.** Fidelity improvements (higher NFE steps, longer reference clip, better
+resampling filter) are trade-offs against latency — document each setting's
+measured effect on both axes so the curator can dial the balance for a specific
+exhibit context.
+
+### 18. Voice completeness — AI seed voice with progressive personalisation
+**Description.** Strengthen the artistic arc established in Feature 7. Currently,
+early turns use a blended neutral seed; if no `assets/neutral_seed.wav` is
+present the blend falls back to alpha=1.0 from turn 1, potentially exposing an
+under-referenced, slightly uncanny clone as the opening voice. This feature makes
+the opening voice *always* complete and natural by (a) bundling a high-quality
+neutral AI seed (generated once from Kokoro and committed to `assets/`), and (b)
+smoothing the migration curve from a step-wise tier function into a continuous
+ramp driven by voiced-seconds accumulated rather than discrete tier thresholds.
+The participant should hear a clearly non-human, neutral voice at the start that
+imperceptibly blends into their own voice over the first 2–3 minutes — not
+a rough early clone. Add a `tts.migration_curve: [linear | ease-in | step]`
+config option. Verify the three curves audibly on the simulation fixture voices
+from Feature 15.
+**Tools.** `mlx-community/Kokoro-82M-bf16` for seed generation; `numpy` for
+interpolation curves; `scipy.interpolate` for smooth easing functions.
+**Sources.** Feature 7 migration blend; Feature 6 `ReferenceBuffer` tier logic;
+Feature 15 simulation fixtures for verification.
+**Extra.** The neutral seed must be generated and committed before this feature
+can be verified. Generate it as part of this feature's implementation step —
+one `python scripts/generate_neutral_seed.py` invocation, output committed to
+`assets/neutral_seed.wav`.
+
+---
+
 ## Progress Log
 - 2026-06-10 — Roadmap authored. Legacy stack (Tacotron2/WaveRNN/encoder, TF1) to
   be replaced by MLX pipeline (Whisper-MLX + F5-TTS-MLX + optional mlx-lm).
@@ -319,6 +412,9 @@ smoke-test, panic/reset, shutdown.
   logging, network-egress assertion; PRIVACY.md. 81 tests pass (1 pre-existing
   failure unrelated to this session). All on-hardware verification deferred to
   exhibit Mac. Next: Features 13–14 (telemetry dashboard, packaging).
+- 2026-06-15 — Features 15–18 added to roadmap (Phase 5: Polish & Simulation).
+  Delivery order: 15 (simulation fixtures) → 16 (operator UI) → 17 (latency/fidelity)
+  → 18 (AI seed voice + smooth migration curve). No implementation started.
 - 2026-06-15 — Automated session. Features 13 and 14 implemented and committed.
   TelemetryLogger (JSONL latency log, health banner, --report CLI digest);
   uv.lock (85 packages); scripts/prefetch_models.py; scripts/smoke_test.sh
