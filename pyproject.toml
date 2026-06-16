@@ -42,4 +42,5 @@ testpaths = ["tests"]
 markers = [
     "model: requires ML model weights to be downloaded (slow, skipped in CI)",
     "hardware: requires real audio hardware",
+    "simulation: end-to-end simulation tests using fixture audio (needs model weights)",
 ]

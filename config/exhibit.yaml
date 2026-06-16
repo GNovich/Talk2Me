@@ -11,11 +11,16 @@ audio:
   noise_calibration_seconds: 2
 
 stt:
-  model: "mlx-community/whisper-large-v3-turbo"   # --stt-model overrides
-  no_speech_threshold: 0.6    # reject utterances with no-speech prob above this
+  model: "mlx-community/whisper-large-v3-turbo"   # full-quality model (phases 2+3)
+  model_fast: null            # Feature 17: smaller model for calibration turns
+                              # e.g. "mlx-community/whisper-small-mlx"
+                              # null = use full model for all turns
+  no_speech_threshold: 0.6   # reject utterances with no-speech prob above this
 
 tts:
   warmup_text: "Hello, I am listening."
+  nfe_steps: 8               # Feature 17: F5-TTS flow-matching steps (default 8)
+                             # lower = faster, higher = better fidelity; try 16/32
 
 engine:
   llm: false                  # enable mlx-lm adaptive question selection (Feature 10)
@@ -36,3 +41,9 @@ privacy:
   # When true, anonymized (no timestamps, no names) transcripts are appended to
   # logs/transcripts_YYYY-MM-DD.log for post-exhibit curatorial review.
   # This must only be enabled with explicit participant consent per the PRIVACY.md policy.
+
+# Feature 16 — attendant UI dashboard
+# Set ui: true to enable the local web dashboard for the gallery attendant.
+# IMPORTANT: the dashboard must be on a screen the participant cannot see.
+ui: false
+ui_port: 8765               # localhost only; never expose to the network

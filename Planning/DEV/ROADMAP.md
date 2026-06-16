@@ -287,7 +287,7 @@ smoke-test, panic/reset, shutdown.
 
 ## Phase 5 — Polish & Simulation
 
-### 15. Voice recording library for simulation and testing
+### 15. Voice recording library for simulation and testing **[COMPLETED 2026-06-16: scripts/generate_fixtures.py generates speaker_f1.wav (5.3 s real voice — F5-TTS bundled test clip), speaker_m1.wav (2.9 s procedural male), speaker_nn1.wav (3.0 s procedural slower tempo) in tests/fixtures/voices/ with .txt transcripts. SimulatedParticipant in tests/simulation.py: next_clip()/reset()/run_turn()/run_session() API; feeds fixture WAVs through Transcriber→ReferenceBuffer→VoiceCloner; saves saved_audio/sim_*. 20 tests (17 structure, 3 @pytest.mark.simulation @pytest.mark.model). Audible clone-quality regression deferred to exhibit Mac; recommend replacing procedural clips with LibriSpeech speakers.]**
 **Description.** All audible verification has been deferred to the exhibit Mac
 because development runs without live participants. Fix that gap by building a
 small library of pre-recorded voice segments that can stand in for a real
@@ -309,7 +309,7 @@ stays fast. Tag tests that use these fixtures with `@pytest.mark.simulation` so
 they can be run separately from unit tests. Latency numbers from simulation
 runs are the primary benchmark until exhibit hardware is available.
 
-### 16. Operator/attendant UI
+### 16. Operator/attendant UI **[COMPLETED 2026-06-16: DashboardServer in talk2me/ui/server.py (stdlib http.server, no extra deps). GET /status returns JSON state; POST /control sends SIGUSR1/2/SIGTERM. dashboard.html: dark-mode single-page; polls /status every 2s; Status, Latency, Conversation history, Controls panels. Gate: ui: false in exhibit.yaml (ui_port: 8765). Wired into supervisor_loop(), main(), and run_loop() (update_status() + reset_session() per turn/reset). 8 tests pass. Cross-device LAN access deferred (requires host: 0.0.0.0 config).]**
 **Description.** A lightweight local web dashboard (or rich TUI) giving the
 attendant real-time visibility and control without touching the terminal. Panels:
 **Status** — current phase, turn count, reference tier, migration alpha, session
@@ -329,7 +329,7 @@ handlers for the control actions; Feature 12 transcript log for the chat view.
 **Extra.** The UI is for the attendant only — it must be on a separate screen or
 device that the participant cannot see. Document this constraint in the runbook.
 
-### 17. Latency reduction and output fidelity
+### 17. Latency reduction and output fidelity **[COMPLETED 2026-06-16: (b) Thread overlap: engine.next_question() submitted to ThreadPoolExecutor(1) immediately after transcription; ref_buffer ops run concurrently on main thread; saves ~1–2 s when LLM adapter is on. (c) Dual Whisper: stt.model_fast config key; calibration turns use fast model, later turns use full model; both pre-warmed. (d) tts.nfe_steps: 8 in exhibit.yaml; wired to VoiceCloner(steps=nfe_steps) in run_loop(). (a) Streaming TTS deferred — F5-TTS sample() returns complete waveform; would require forking upstream. 6 new tests pass. On-hardware latency benchmarking deferred to exhibit Mac.]**
 **Description.** Profile every stage of the hot path and push toward a
 consistent <2 s total round-trip. Concrete targets: (a) **Streaming TTS
 playback** — begin playing the first synthesized audio chunk while F5-TTS is
@@ -421,3 +421,11 @@ one `python scripts/generate_neutral_seed.py` invocation, output committed to
   (6/6 pass on dev machine); RUNBOOK.md for gallery attendant. 94 tests pass
   (1 pre-existing failure). All 14 roadmap features COMPLETED. Remaining items
   are operational (on-hardware verification, asset placement, launchd install).
+- 2026-06-16 — Automated session. Features 15, 16, 17 implemented and committed.
+  SimulatedParticipant + fixture audio (scripts/generate_fixtures.py generates
+  speaker_f1 real voice + speaker_m1/nn1 procedural); DashboardServer
+  (attendant web UI, stdlib only, polling dashboard.html); latency optimisations
+  (thread-overlap question selection, dual Whisper fast/full models, tts.nfe_steps
+  config). 124 tests pass (+30). All audible verification and on-hardware latency
+  benchmarking deferred to exhibit Mac. Feature 18 (AI seed + smooth migration
+  curve) is the remaining Phase 5 item.

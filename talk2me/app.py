@@ -28,11 +28,21 @@ logs/telemetry_YYYY-MM-DD.jsonl (latency + phase only, no participant data).
 A one-line health banner ([OK]/[SLOW]/[!!]) is printed after each turn.
 ``talk2me --report YYYY-MM-DD`` prints the full per-turn table.
 
+Feature 16 wired: when ui=true in exhibit.yaml, a DashboardServer starts in a
+background thread, serving a local web dashboard for the attendant at
+http://127.0.0.1:<ui_port>/.  Status is updated each turn.
+
+Feature 17 wired: (b) ConversationEngine.next_question() runs concurrently with
+ref_buffer operations in a ThreadPoolExecutor after transcription completes;
+(c) a fast Whisper model (stt.model_fast) is used for calibration turns;
+(d) F5-TTS nfe_steps is configurable via tts.nfe_steps in exhibit.yaml.
+
 Latency is instrumented at every stage; per-turn breakdown is printed and
 accumulated for the session log.
 """
 from __future__ import annotations
 
+import concurrent.futures
 import datetime
 import logging
 import os
@@ -205,6 +215,7 @@ def run_loop(
     save_audio: bool = True,
     skip_consent: bool = False,
     telemetry_logger=None,
+    ui_server=None,
 ) -> None:
     """Run one full Talk2Me session (consent → turns → purge).
 
@@ -217,10 +228,12 @@ def run_loop(
         save_audio: Write per-turn synthesis WAVs to saved_audio/.
         skip_consent: Skip the consent gate (used in tests and supervisor restarts
                       when the attendant has already confirmed).
+        ui_server: Optional DashboardServer instance (Feature 16).
     """
     cfg = _load_config(config_path)
     audio_cfg = cfg.get("audio", {})
     stt_cfg = cfg.get("stt", {})
+    tts_cfg = cfg.get("tts", {})
     engine_cfg = cfg.get("engine", {})
     privacy_cfg = cfg.get("privacy", {})
     kiosk = cfg.get("kiosk", False)
@@ -253,8 +266,19 @@ def run_loop(
         gain=audio_cfg.get("input_gain", 1.0),
     )
     speaker_for_tts: Optional[Speaker] = None  # created once at 24 kHz
-    transcriber = Transcriber(model=stt_cfg.get("model", "mlx-community/whisper-large-v3-turbo"))
-    cloner = VoiceCloner()
+
+    # Feature 17c: dual Whisper models — fast for calibration, full for later
+    full_model = stt_cfg.get("model", "mlx-community/whisper-large-v3-turbo")
+    fast_model = stt_cfg.get("model_fast") or full_model
+    transcriber = Transcriber(model=full_model)
+    transcriber_fast: Optional[Transcriber] = None
+    if fast_model != full_model:
+        transcriber_fast = Transcriber(model=fast_model)
+        print(f"[app] Dual Whisper: fast={fast_model!r} / full={full_model!r}")
+
+    # Feature 17d: configurable F5-TTS nfe_steps
+    nfe_steps = tts_cfg.get("nfe_steps", 8)
+    cloner = VoiceCloner(steps=nfe_steps)
 
     migration_enabled = engine_cfg.get("migration", True)
     migration_alphas = tuple(engine_cfg.get("migration_alphas", [0.2, 0.5, 0.8, 1.0]))
@@ -289,7 +313,11 @@ def run_loop(
     print("[app] Pre-warming Whisper … (transcribe silent input)")
     _ = transcriber.transcribe(np.zeros(16_000, dtype=np.float32))
 
-    print("[app] Pre-warming F5-TTS … (throwaway synthesis)")
+    if transcriber_fast is not None:
+        print("[app] Pre-warming fast Whisper …")
+        _ = transcriber_fast.transcribe(np.zeros(16_000, dtype=np.float32))
+
+    print(f"[app] Pre-warming F5-TTS (nfe_steps={nfe_steps}) … (throwaway synthesis)")
     cloner.warm()
 
     if llm_adapter is not None:
@@ -339,6 +367,8 @@ def run_loop(
                 session_latencies.clear()
                 speaker_for_tts = None
                 _reset_requested.clear()
+                if ui_server is not None:
+                    ui_server.reset_session()
                 print("[app] Session reset. Listening for next participant …\n")
                 if not skip_consent:
                     consented = consent_gate(privacy_cfg, kiosk=kiosk)
@@ -356,6 +386,8 @@ def run_loop(
                 logical_turn = 0
                 session_latencies.clear()
                 speaker_for_tts = None
+                if ui_server is not None:
+                    ui_server.reset_session()
                 print("[app] Session reset. Listening for next participant …\n")
                 if not skip_consent:
                     consented = consent_gate(privacy_cfg, kiosk=kiosk)
@@ -377,12 +409,17 @@ def run_loop(
                     print("[app] No speech detected, re-prompting.")
                     continue
 
-                # 2. Transcribe
+                # 2. Transcribe — Feature 17c: use fast model during calibration turns
                 t_stt = time.perf_counter()
-                result = transcriber.transcribe(wav)
+                in_calibration = (logical_turn + 1) <= engine_cfg.get("calibration_turns", 2)
+                active_transcriber = (
+                    transcriber_fast if (transcriber_fast is not None and in_calibration)
+                    else transcriber
+                )
+                result = active_transcriber.transcribe(wav)
                 stt_s = time.perf_counter() - t_stt
 
-                if not transcriber.is_speech(result, threshold=no_speech_threshold):
+                if not active_transcriber.is_speech(result, threshold=no_speech_threshold):
                     print(
                         f"[app] Likely non-speech "
                         f"(no_speech_prob={result.no_speech_prob:.2f}), re-prompting."
@@ -393,18 +430,25 @@ def run_loop(
                 if transcript_log_path is not None:
                     _log_transcript(result.text, transcript_log_path)
 
-                # 3. Push to reference buffer
-                ref_buffer.push(wav, result, sample_rate=MIC_RATE)
-                ref_wav, ref_text = ref_buffer.best_reference()
+                # 3+4. Push to ref buffer and choose question concurrently (Feature 17b).
+                # question selection runs in a thread while ref_buffer ops proceed on main;
+                # saves ~1-2 s when LLM adapter is active.
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+                    question_future = _pool.submit(engine.next_question)
+
+                    # Ref buffer ops on main thread (fast)
+                    ref_buffer.push(wav, result, sample_rate=MIC_RATE)
+                    ref_wav, ref_text = ref_buffer.best_reference()
+
+                    # Wait for question (usually already done)
+                    question = question_future.result()
+
+                logical_turn_next = logical_turn + 1
+                print(f"[app] Phase {engine.phase}, turn {logical_turn_next}: {question!r}")
 
                 if ref_wav is None or not ref_text:
                     print("[app] No usable reference audio yet, re-prompting.")
                     continue
-
-                # 4. Choose question (Features 8+9+10)
-                logical_turn_next = logical_turn + 1
-                question = engine.next_question()
-                print(f"[app] Phase {engine.phase}, turn {logical_turn_next}: {question!r}")
 
                 # 5. Determine migration alpha (Feature 7)
                 if migration_enabled and cloner.has_neutral_seed:
@@ -446,6 +490,8 @@ def run_loop(
                     f"(tier={ref_buffer.tier}, voiced={ref_buffer.voiced_seconds:.1f}s, "
                     f"alpha={alpha:.2f}, phase={engine.phase})"
                 )
+
+                banner = "—"
                 if telemetry_logger is not None:
                     banner = telemetry_logger.log_turn(
                         turn=logical_turn,
@@ -458,6 +504,23 @@ def run_loop(
                         total_s=total_s,
                     )
                     print(f"[telemetry] {banner}")
+
+                # Feature 16: update attendant dashboard
+                if ui_server is not None:
+                    ui_server.update_status(
+                        phase=engine.phase,
+                        turn=logical_turn,
+                        tier=ref_buffer.tier,
+                        alpha=alpha,
+                        health=banner,
+                        session_active=True,
+                        last_transcript=result.text,
+                        last_question=question,
+                        voiced_s=ref_buffer.voiced_seconds,
+                        stt_s=stt_s,
+                        tts_s=tts_s,
+                        total_s=total_s,
+                    )
 
                 if save_audio:
                     _save_wav(
@@ -526,6 +589,13 @@ def supervisor_loop(
     from talk2me.telemetry import TelemetryLogger
     tlog = TelemetryLogger(project_root / "logs")
 
+    # Feature 16: optional attendant UI dashboard
+    ui_server = None
+    if cfg.get("ui", False):
+        from talk2me.ui.server import DashboardServer
+        ui_server = DashboardServer(port=cfg.get("ui_port", 8765))
+        ui_server.start()
+
     print(f"[supervisor] Talk2Me starting (PID {os.getpid()}).")
     print(f"[supervisor]   SIGUSR1 = attendant reset  |  SIGUSR2 = panic/purge  |  SIGTERM = shutdown")
 
@@ -536,6 +606,7 @@ def supervisor_loop(
                 save_audio=save_audio,
                 skip_consent=not first_run,  # attendant already consented at startup
                 telemetry_logger=tlog,
+                ui_server=ui_server,
             )
             consecutive_crashes = 0
             first_run = False
@@ -625,11 +696,19 @@ def main() -> None:
         project_root = Path(__file__).parent.parent
         from talk2me.telemetry import TelemetryLogger
         tlog = TelemetryLogger(project_root / "logs")
+        # Feature 16: optional UI in dev mode
+        ui_server = None
+        cfg_for_ui = _load_config(args.config)
+        if cfg_for_ui.get("ui", False):
+            from talk2me.ui.server import DashboardServer
+            ui_server = DashboardServer(port=cfg_for_ui.get("ui_port", 8765))
+            ui_server.start()
         run_loop(
             config_path=args.config,
             max_turns=args.max_turns,
             save_audio=not args.no_save_audio,
             telemetry_logger=tlog,
+            ui_server=ui_server,
         )
 
 

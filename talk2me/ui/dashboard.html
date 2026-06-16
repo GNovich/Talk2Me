@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talk2Me — Attendant Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Courier New', monospace; background: #0a0a0a; color: #d4d4d4; padding: 20px; }
+  h1  { color: #e8e8e8; font-size: 1.1rem; letter-spacing: 0.1em; margin-bottom: 16px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .panel { background: #141414; border: 1px solid #2a2a2a; border-radius: 4px; padding: 12px; }
+  .panel h2 { font-size: 0.65rem; letter-spacing: 0.15em; text-transform: uppercase; color: #666; margin-bottom: 8px; }
+  .stat-row { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 2px 0; }
+  .stat-label { color: #888; }
+  .stat-value { color: #ccc; font-weight: bold; }
+  .health-ok   { color: #5a9e5a; }
+  .health-slow { color: #c8a42a; }
+  .health-crit { color: #b84040; }
+  .health-idle { color: #666; }
+  #health-banner { font-size: 1.4rem; font-weight: bold; text-align: center; padding: 8px; border-radius: 4px; margin-bottom: 12px; background: #1a1a1a; border: 1px solid #2a2a2a; }
+  .chat-entry { border-bottom: 1px solid #1e1e1e; padding: 6px 0; font-size: 0.75rem; }
+  .chat-transcript { color: #888; }
+  .chat-transcript::before { content: "P: "; color: #4a7a8a; }
+  .chat-question { color: #aaa; margin-top: 2px; }
+  .chat-question::before { content: "M: "; color: #7a5a8a; }
+  .controls { display: flex; gap: 8px; }
+  button { flex: 1; padding: 10px 8px; border: 1px solid #333; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.75rem; letter-spacing: 0.05em; transition: background 0.15s; }
+  .btn-reset    { background: #1a2a1a; color: #6ab06a; border-color: #2a4a2a; }
+  .btn-reset:hover { background: #2a4a2a; }
+  .btn-panic    { background: #2a1a1a; color: #b06a6a; border-color: #4a2a2a; }
+  .btn-panic:hover { background: #4a2a2a; }
+  .btn-shutdown { background: #1a1a2a; color: #6a6ab0; border-color: #2a2a4a; }
+  .btn-shutdown:hover { background: #2a2a4a; }
+  #last-update { font-size: 0.6rem; color: #444; text-align: right; margin-top: 6px; }
+  .chat-scroll { max-height: 260px; overflow-y: auto; }
+  .phase-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.7rem; }
+  .phase-1 { background: #1a2a1a; color: #6ab06a; }
+  .phase-2 { background: #2a2a1a; color: #b0a06a; }
+  .phase-3 { background: #2a1a1a; color: #b06a6a; }
+  .phase-0 { background: #1a1a1a; color: #666; }
+</style>
+</head>
+<body>
+<h1>TALK2ME — ATTENDANT DASHBOARD</h1>
+
+<div id="health-banner" class="health-idle">—</div>
+
+<div class="grid">
+  <!-- Status panel -->
+  <div class="panel">
+    <h2>Session Status</h2>
+    <div class="stat-row"><span class="stat-label">Phase</span><span class="stat-value" id="phase">—</span></div>
+    <div class="stat-row"><span class="stat-label">Turn</span><span class="stat-value" id="turn">—</span></div>
+    <div class="stat-row"><span class="stat-label">Reference tier</span><span class="stat-value" id="tier">—</span></div>
+    <div class="stat-row"><span class="stat-label">Migration alpha</span><span class="stat-value" id="alpha">—</span></div>
+    <div class="stat-row"><span class="stat-label">Voiced</span><span class="stat-value" id="voiced_s">—</span></div>
+    <div class="stat-row"><span class="stat-label">Session active</span><span class="stat-value" id="session_active">—</span></div>
+  </div>
+
+  <!-- Latency panel -->
+  <div class="panel">
+    <h2>Last Turn Latency</h2>
+    <div class="stat-row"><span class="stat-label">STT</span><span class="stat-value" id="stt_s">—</span></div>
+    <div class="stat-row"><span class="stat-label">TTS</span><span class="stat-value" id="tts_s">—</span></div>
+    <div class="stat-row"><span class="stat-label">Total</span><span class="stat-value" id="total_s">—</span></div>
+    <div class="stat-row" style="margin-top:8px"><span class="stat-label">Uptime</span><span class="stat-value" id="uptime_s">—</span></div>
+    <div class="stat-row"><span class="stat-label">PID</span><span class="stat-value" id="pid">—</span></div>
+  </div>
+</div>
+
+<!-- Transcript history panel -->
+<div class="panel" style="margin-bottom:12px">
+  <h2>Conversation (attendant only — not shown to participant)</h2>
+  <div class="chat-scroll" id="chat-view"></div>
+</div>
+
+<!-- Controls -->
+<div class="panel">
+  <h2>Controls</h2>
+  <div class="controls">
+    <button class="btn-reset" onclick="sendControl('reset')" title="SIGUSR1 — reset session, clear buffers">
+      ↺ RESET SESSION
+    </button>
+    <button class="btn-panic" onclick="sendControl('panic')" title="SIGUSR2 — immediate purge + standby">
+      ⊗ PANIC PURGE
+    </button>
+    <button class="btn-shutdown" onclick="sendControl('shutdown')" title="SIGTERM — clean shutdown">
+      ■ SHUTDOWN
+    </button>
+  </div>
+</div>
+
+<div id="last-update">Connecting…</div>
+
+<script>
+const POLL_MS = 2000;
+
+function phaseLabel(p) {
+  const labels = {0: "—", 1: "1 · Calibration", 2: "2 · Personal", 3: "3 · Confrontational"};
+  const cls = {0: "phase-0", 1: "phase-1", 2: "phase-2", 3: "phase-3"};
+  return `<span class="phase-badge ${cls[p] || 'phase-0'}">${labels[p] || p}</span>`;
+}
+
+function fmt(s) { return typeof s === 'number' ? s.toFixed(2) + 's' : s; }
+function fmtUptime(s) {
+  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+  return `${m}m ${sec}s`;
+}
+
+function setEl(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = val;
+}
+
+function healthClass(h) {
+  if (h === '[OK]') return 'health-ok';
+  if (h === '[SLOW]') return 'health-slow';
+  if (h === '[!!]') return 'health-crit';
+  return 'health-idle';
+}
+
+function renderChat(history) {
+  const view = document.getElementById('chat-view');
+  if (!history || history.length === 0) { view.innerHTML = '<div style="color:#444;font-size:0.75rem;padding:6px 0">No turns yet.</div>'; return; }
+  const html = history.slice().reverse().map(e => `
+    <div class="chat-entry">
+      <div class="chat-transcript">${escHtml(e.transcript || '')}</div>
+      <div class="chat-question">${escHtml(e.question || '')}</div>
+    </div>`).join('');
+  view.innerHTML = html;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/status');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+
+    const banner = document.getElementById('health-banner');
+    banner.textContent = d.health || '—';
+    banner.className = healthClass(d.health || '');
+
+    setEl('phase', phaseLabel(d.phase || 0));
+    setEl('turn', d.turn || 0);
+    setEl('tier', (d.tier || 0) + ' / 3');
+    setEl('alpha', typeof d.alpha === 'number' ? d.alpha.toFixed(2) : '—');
+    setEl('voiced_s', typeof d.voiced_s === 'number' ? d.voiced_s.toFixed(1) + 's' : '—');
+    setEl('session_active', d.session_active ? '<span style="color:#5a9e5a">●</span> active' : '<span style="color:#666">○</span> idle');
+    setEl('stt_s', fmt(d.stt_s));
+    setEl('tts_s', fmt(d.tts_s));
+    setEl('total_s', `<b>${fmt(d.total_s)}</b>`);
+    setEl('uptime_s', fmtUptime(d.uptime_s || 0));
+    setEl('pid', d.pid || '—');
+
+    renderChat(d.transcript_history || []);
+    document.getElementById('last-update').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('last-update').textContent = 'Disconnected — retrying…';
+  }
+  setTimeout(poll, POLL_MS);
+}
+
+async function sendControl(action) {
+  const labels = {reset: 'Reset session?', panic: 'PANIC purge — wipe session immediately?', shutdown: 'Shutdown installation?'};
+  if (!confirm(labels[action] || action)) return;
+  try {
+    const r = await fetch('/control', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action})});
+    const d = await r.json();
+    alert(d.ok ? 'Sent: ' + action : 'Error: ' + d.error);
+  } catch (e) { alert('Request failed: ' + e); }
+}
+
+poll();
+</script>
+</body>
+</html>
