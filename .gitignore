@@ -14,6 +14,8 @@
 *.bcf
 *.toc
 *.wav
+# Allow committed test fixture clips (Feature 15 simulation)
+!tests/fixtures/**/*.wav
 *.sh
 saved_audio/*
 !saved_audio/.gitkeep
